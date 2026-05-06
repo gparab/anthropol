@@ -140,11 +140,11 @@ export function useAnthropol() {
 
       const samples: RGBPoint[] = [];
       const captureStart = performance.now();
-      const DURATION = 3000; // 3-second biometric burst
+      const TARGET_SAMPLES = 120; // Ensure we hit the DSP worker's WINDOW_SIZE
       
       // 2. BIOMETRIC CAPTURE LOOP
       addLog('Sampling biological signals (POS algorithm active)...', 'info');
-      while (performance.now() - captureStart < DURATION) {
+      while (samples.length < TARGET_SAMPLES) {
         const timestamp = performance.now();
         const elapsed = timestamp - captureStart;
         ctx.drawImage(videoElement, 0, 0);
@@ -159,7 +159,7 @@ export function useAnthropol() {
         setState(s => ({ 
           ...s, 
           status: 'CAPTURING BIOMETRIC BURST', 
-          progress: (elapsed / DURATION) * 100,
+          progress: (samples.length / TARGET_SAMPLES) * 100,
           metrics: {
             ...s.metrics,
             rppgDiff: `${(Math.random() * 0.05 - 0.025).toFixed(2)}ms`,

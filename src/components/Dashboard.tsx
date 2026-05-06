@@ -48,28 +48,27 @@ export const Dashboard = () => {
 
   /**
    * Analytics & Data Ingestion
-   * Synchronizes performance telemetry from the server-side aggregator.
-   * Implements a fallback strategy for edge-case network instability.
+   * Synchronizes performance telemetry using client-side listener.
    */
   useEffect(() => {
-    const fetchAnalytics = async () => {
-      try {
-        const response = await fetch('/api/analytics');
-        if (!response.ok) {
-           throw new Error(`Analytics node unreachable: ${response.status}`);
-        }
-        const data = await response.json();
+    const user = auth.currentUser;
+    if (!user) {
+      setAnalyticsError('User not authenticated');
+      return;
+    }
+
+    return verificationService.subscribeToHourlyAnalytics(
+      user.uid,
+      (data) => {
         setAnalyticsData(data);
         setAnalyticsError(null);
-      } catch (e: any) {
-        console.error('[INFRA]: Failed to load live analytics aggregator.', e);
-        setAnalyticsError(e.message || 'Network unreachable');
+      },
+      (err) => {
+        console.error('[INFRA]: Failed to load live analytics aggregator.', err);
+        setAnalyticsError(err);
         setAnalyticsData([]);
       }
-    };
-    fetchAnalytics();
-    const interval = setInterval(fetchAnalytics, 30000); 
-    return () => clearInterval(interval);
+    );
   }, []);
 
   /**

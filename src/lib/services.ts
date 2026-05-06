@@ -446,6 +446,54 @@ export const verificationService = {
     });
   },
 
+  subscribeToHourlyAnalytics(clientId: string, callback: (data: any[]) => void, onError?: (err: string) => void, zone: LegalZone = 'US-EAST') {
+    const path = 'verifications';
+    const targetDb = this.getRegionalDb(zone);
+    const q = query(
+      collection(targetDb, path), 
+      where('clientId', '==', clientId),
+      orderBy('timestamp', 'desc'),
+      limit(500)
+    );
+    
+    return onSnapshot(q, (snapshot) => {
+      const statsByHour: Record<string, any> = {};
+      
+      snapshot.docs.forEach(doc => {
+        const data = doc.data();
+        const timestamp = data.timestamp as Timestamp;
+        let hour = 0;
+        
+        if (timestamp) {
+          hour = timestamp.toDate().getHours();
+        }
+        
+        const hourLabel = `${hour.toString().padStart(2, '0')}:00`;
+        
+        if (!statsByHour[hourLabel]) {
+          statsByHour[hourLabel] = { time: hourLabel, human: 0, mask: 0, static: 0 };
+        }
+
+        if (data.status === 'passed') {
+          statsByHour[hourLabel].human++;
+        } else if (data.reason === 'MASK_ATTACK' || data.reason === 'FLICKER_ANOMALY') {
+          statsByHour[hourLabel].mask++;
+        } else {
+          statsByHour[hourLabel].static++;
+        }
+      });
+
+      const sorted = Object.values(statsByHour).sort((a: any, b: any) => a.time.localeCompare(b.time));
+      callback(sorted.length > 0 ? sorted : [{ time: '00:00', static: 0, mask: 0, human: 0 }]);
+    }, (error) => {
+      if (onError) onError(error instanceof Error ? error.message : String(error));
+      try {
+        handleFirestoreError(error, OperationType.LIST, path);
+      } catch (e) {
+      }
+    });
+  },
+
   /**
    * Upgrades client quota tier.
    */

@@ -26,16 +26,6 @@ export const cryptoOracle = {
     telemetry: TelemetryData, 
     credentialId?: string
   ): Promise<ZKProof> {
-    // Check for circuit assets (WASM/ZKEY detection)
-    let protocolType: 'signature-fallback' | 'groth16' = 'signature-fallback';
-    try {
-      // PROD CHECK: Ensure WASM is loaded at runtime
-      const response = await fetch('/circuits/humanity_check.wasm', { method: 'HEAD' });
-      if (response.ok) protocolType = 'groth16';
-    } catch (e) {
-      console.warn("[CRYPTO]: ZK Circuits not found in public/, defaulting to high-fidelity signature fallback.");
-    }
-
     // Input signal derivation (Field element compatible)
     const input = {
       bpm: BigInt(Math.round(telemetry.bpm || 72)).toString(),
@@ -63,37 +53,9 @@ export const cryptoOracle = {
         attestation: { proof, publicSignals, protocol: 'groth16' },
         timestamp: Number(input.timestamp)
       };
-    } catch (e) {
-      console.warn("[ZK_ORACLE]: Proving failed. Reason:", e instanceof Error ? e.message : 'Unknown');
-      
-      // FALLBACK & DEVELOPER GUIDANCE:
-      // The signature fallback provides a cryptographically signed attestation 
-      // of the input but lacks the formal ZK-safety properties of the Groth16 path.
-      
-      const message = `${input.userIdHash}:${input.signalHash}:${input.bpm}:${input.nonce}:${input.timestamp}`;
-      const encoder = new TextEncoder();
-      const data = encoder.encode(message);
-      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-      const attestationHash = Array.from(new Uint8Array(hashBuffer))
-        .map(b => b.toString(16).padStart(2, '0'))
-        .join('');
-
-      const attestation = {
-        proof: {
-           pi_a: [ethers.hexlify(ethers.randomBytes(32)), ethers.hexlify(ethers.randomBytes(32)), "1"],
-           pi_b: [[ethers.hexlify(ethers.randomBytes(32)), ethers.hexlify(ethers.randomBytes(32))], [ethers.hexlify(ethers.randomBytes(32)), ethers.hexlify(ethers.randomBytes(32))]],
-           pi_c: [ethers.hexlify(ethers.randomBytes(32)), ethers.hexlify(ethers.randomBytes(32)), "1"],
-           protocol: protocolType,
-           signature: attestationHash 
-        },
-        publicSignals: [input.signalHash, input.userIdHash, input.credentialHash, input.bpm.toString()]
-      };
-
-      return {
-        proofId: `auth_${ethers.hexlify(ethers.randomBytes(8)).replace('0x', '')}`,
-        attestation,
-        timestamp: Number(input.timestamp)
-      };
+    } catch (e: any) {
+      console.error("[ZK_ORACLE]: Proving failed. Reason:", e.message);
+      throw new Error(`Zero-Knowledge Proof generation failed: ${e.message}`);
     }
   },
 
