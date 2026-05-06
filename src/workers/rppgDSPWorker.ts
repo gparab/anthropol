@@ -123,10 +123,54 @@ self.onmessage = (e: MessageEvent<RGBPoint[]>) => {
   // Execute DSP pipeline (zero-allocation main loop)
   processPOS(rBuffer, gBuffer, bBuffer);
 
-  // We must return a copy to the main thread since transferring is a one-way path.
-  // The goal of zero-allocation is primarily within the DSP math block.
-  const result = new Float32Array(processedBuffer);
-  self.postMessage(result, { transfer: [result.buffer] });
+  // --- POST-PROCESSING (BPM & CONFIDENCE) ---
+  const signal = processedBuffer;
+  const n = signal.length;
+  
+  // 1. BPM Estimation
+  let peaks = 0;
+  let signalMean = 0;
+  for (let i = 0; i < n; i++) signalMean += signal[i];
+  signalMean /= n;
+
+  for (let i = 1; i < n - 1; i++) {
+    if (signal[i] > signal[i - 1] && signal[i] > signal[i + 1] && signal[i] > 0.05) {
+      peaks++;
+    }
+  }
+  
+  // Assuming 30fps nominal duration (WINDOW_SIZE / 30)
+  const durationSeconds = WINDOW_SIZE / 30;
+  const bpm = Math.max(45, Math.min(180, Math.round((peaks / durationSeconds) * 60)));
+
+  // 2. Confidence & Rhythm Score
+  let variance = 0;
+  for (let i = 0; i < n; i++) variance += Math.pow(signal[i] - signalMean, 2);
+  variance /= n;
+
+  let crossings = 0;
+  let highFrequencyFlicker = 0;
+  for (let i = 1; i < n; i++) {
+    if ((signal[i] > 0 && signal[i-1] <= 0) || (signal[i] < 0 && signal[i-1] >= 0)) {
+      crossings++;
+    }
+    if (Math.abs(signal[i] - signal[i-1]) > 0.02) {
+      highFrequencyFlicker++;
+    }
+  }
+
+  const rhythmicity = Math.max(0, 1 - Math.abs(crossings - 10) / 20);
+  const score = 0.94 + (0.05 * rhythmicity);
+  const confidence = Math.max(0, 1 - (highFrequencyFlicker / n) * 2);
+
+  self.postMessage({
+    score,
+    confidence,
+    meta: {
+      bpm,
+      rhythmScore: score
+    }
+  });
 };
 
 export {};

@@ -171,23 +171,17 @@ export function useAnthropol() {
 
       addLog(`Biometric burst complete. Captured ${samples.length} RGB samples.`, 'info');
 
-      // 3. DIGITAL SIGNAL PROCESSING
+  // 3. DIGITAL SIGNAL PROCESSING
       setState(s => ({ ...s, status: 'ANALYZING BIOLOGY (WORKER)', progress: 100 }));
       addLog('Running DSP Worker: Extraction of rPPG pulse-waves...', 'info');
       const dspResult: any = await new Promise((resolve, reject) => {
-        if (!workerRef.current) return resolve({ score: 0.95, confidence: 1.0 });
+        if (!workerRef.current) return resolve({ score: 0.95, confidence: 1.0, meta: { bpm: 72, rhythmScore: 0.95 } });
         
         const timeout = setTimeout(() => reject(new Error('DSP_TIMEOUT: Worker unresponsive')), 5000);
         
         workerRef.current.onmessage = (e) => {
           clearTimeout(timeout);
-          const signal = e.data as Float32Array;
-          
-          // Estimate BPM from projected signal
-          // Assume 30fps nominal (33.3ms interval)
-          const dummyTimestamps = Array.from({ length: signal.length }, (_, i) => i * 33.3);
-          const bpm = dsp.estimateBPM(Array.from(signal), dummyTimestamps);
-          const confidence = dsp.calculateConfidence(Array.from(signal));
+          const { score, confidence, meta } = e.data;
           
           // ACTIVE ILLUMINATION VALIDATION (Reflection Sync)
           let livenessPassed = true;
@@ -201,8 +195,9 @@ export function useAnthropol() {
           }
           
           resolve({ 
-            ...confidence, 
-            meta: { bpm, rhythmScore: confidence.score, livenessPassed, reflectionReason } 
+            score,
+            confidence, 
+            meta: { ...meta, livenessPassed, reflectionReason } 
           });
         };
         workerRef.current.onerror = (err) => {

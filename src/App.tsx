@@ -29,7 +29,7 @@ import { Pricing } from './components/Pricing';
 import { AnthropolAnalyticsHub } from './components/AnthropolAnalyticsHub';
 import { AuthPage } from './components/AuthPage';
 import { ProfilePage } from './components/ProfilePage';
-import { auth, signInWithGoogle } from './lib/firebase';
+import { auth, db, signInWithGoogle } from './lib/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { verificationService } from './lib/services';
 
@@ -45,6 +45,7 @@ export default function App() {
   const [view, setView] = useState<AppView>(AppView.DASHBOARD);
   const [isVerified, setIsVerified] = useState(false);
   const [user, setUser] = useState<User | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [metrics, setMetrics] = useState({
@@ -83,19 +84,38 @@ export default function App() {
   };
 
   /**
-   * Identity State Synchronization
-   * Attaches a listener to the Firebase Auth stream and initializes 
-   * a client profile on successful onboarding.
+   * PROTOCOL: Identity State Synchronization
+   * 
+   * Orchestrates the complex lifecycle of a verified operator:
+   * 1. Listens for core Auth transitions.
+   * 2. Authoritatively verifies administrative status via the 'admins' relation.
+   * 3. Ensures the presence of a persistent client profile (Lazy Hydration).
    */
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       setUser(u);
+      
       if (u) {
-        // Auto-initialize profile if it doesn't exist (Lazy onboarding)
+        // [AUTH-LIFECYCLE]: Synchronize administrative privileges. 
+        // We fetch this document directly instead of relying on claims to ensure 
+        // immediate consistency across global infrastructure.
+        try {
+          const { doc, getDoc } = await import('firebase/firestore');
+          const adminDoc = await getDoc(doc(db, 'admins', u.uid));
+          setIsAdmin(adminDoc.exists());
+        } catch (e) {
+          console.error('[AUTH-PROTOCOL]: Failed to synchronize admin authority:', e);
+          setIsAdmin(false);
+        }
+
+        // [USER-LIFECYCLE]: Lazy infrastructure hydration.
+        // Ensure the high-sovereignty profile document exists for the session.
         const profile = await verificationService.getClientProfile(u.uid);
         if (!profile) {
-          await verificationService.initializeClientProfile(u.uid, u.displayName || u.email || 'Entity');
+          await verificationService.initializeClientProfile(u.uid, u.displayName || u.email || 'Operator');
         }
+      } else {
+        setIsAdmin(false);
       }
       setLoading(false);
     });
@@ -105,9 +125,6 @@ export default function App() {
   const handleCaptureComplete = () => {
     setIsVerified(true);
   };
-
-  // Hardcoded Admin Access (Gautam Parab)
-  const isAdmin = user?.email === 'parabgautam@gmail.com';
 
   if (loading) {
     return (
@@ -533,7 +550,7 @@ export default function App() {
             {view === 'dashboard' && <Dashboard />}
             {view === 'analytics' && <AnthropolAnalyticsHub />}
             {view === 'admin' && (
-              <AdminRoute>
+              <AdminRoute isAdmin={isAdmin}>
                 <AdminPanel />
               </AdminRoute>
             )}

@@ -11,7 +11,7 @@ service cloud.firestore {
     function isVerifiedUser() { 
       return isSignedIn(); 
     }
-    function isAdmin() { return isSignedIn() && request.auth.token.email == 'parabgautam@gmail.com'; }
+    function isAdmin() { return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)); }
     function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
     function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
     
@@ -112,6 +112,14 @@ service cloud.firestore {
         incoming().diff(existing()).affectedKeys().hasOnly(['totalVerifications', 'botInterceptions', 'successRate', 'networkLoad']) ||
         isAdmin()
       );
+    }
+
+    // 6. Administrative Authority (Internal)
+    // Locked down Registry of designated system administrators.
+    // Self-promotion is mathematically impossible via setup-key-protection.
+    match /admins/{uid} {
+      allow get: if isSignedIn() && request.auth.uid == uid;
+      allow list, create, update, delete: if false; // Only manageable via Backend Node + Setup Key
     }
   }
 }

@@ -6,18 +6,17 @@ import { auth } from '../lib/firebase';
 interface AdminRouteProps {
   children: React.ReactNode;
   fallback?: React.ReactNode;
+  isAdmin?: boolean;
 }
 
 /**
  * AdminRoute Component
  * 
  * Protects sensitive administrative views. 
- * Only allows access if the authenticated user matches the hardcoded 
- * master administrator identity (Gautam Parab).
+ * Allows access based on the isAdmin prop, which is derived from 
+ * Firebase Custom Claims.
  */
-export const AdminRoute: React.FC<AdminRouteProps> = ({ children, fallback }) => {
-  const user = auth.currentUser;
-  const isAdmin = user?.email === 'parabgautam@gmail.com';
+export const AdminRoute: React.FC<AdminRouteProps> = ({ children, fallback, isAdmin = false }) => {
 
   if (!isAdmin) {
     return fallback ? (

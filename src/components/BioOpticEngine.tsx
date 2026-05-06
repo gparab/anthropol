@@ -49,6 +49,12 @@ export const BioOpticEngine = ({ onCaptureComplete, onReset, onMetricUpdate, onL
    * Provisions the user's camera module with optimized constraints for dSP rPPG analysis.
    */
   const startCamera = async () => {
+    // Prevent memory leaks: stop existing tracks before re-initializing
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+      setStream(null);
+    }
+
     setInternalStatus('initializing');
     try {
       const mediaStream = await navigator.mediaDevices.getUserMedia({
