@@ -1,11 +1,31 @@
-<div align="center">
+# README: Anthropol Institutional Mesh
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+## Introduction
+Anthropol.io is the infrastructure layer for a human-centric internet. We provide sub-perceptual bio-telemetry and Zero-Knowledge identity oracles to protect the world's most resilient digital ecosystems.
 
-  <h1>Built with AI Studio</h2>
+---
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+## 🛠 Project Structure
+- **/src/lib/dsp.ts:** Core Digital Signal Processing for rPPG pulse extraction.
+- **/src/lib/services.ts:** Global orchestration for shards & identity verification.
+- **/src/components/BioOpticEngine.tsx:** Client-side camera & signal recovery UI.
+- **/Documentation:** Comprehensive technical and product specifications.
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+## 🚀 Development
+1. **Clone the repository.**
+2. **Install dependencies:** `npm install`
+3. **Environment Setup:** Create `.env` based on `.env.example`.
+4. **Start Development:** `npm run dev`
 
-</div>
+## 📚 Documentation Table of Contents
+- [Quick Start Guide](/Documentation/QuickStart.md)
+- [System Architecture](/Documentation/Architecture.md)
+- [API Specification](/Documentation/API.md)
+- [Security & Compliance](/Documentation/Security.md)
+- [Architecture Decision Records](/Documentation/ADR/001-rPPG-Pipeline.md)
+- [Product Requirements Document (PRD)](/Documentation/Product/PRD.md)
+- [Runbooks & Troubleshooting](/Documentation/Runbooks.md)
+
+## ⚖️ License
+Proprietary // Institutional License Required for Production Shards.
+Contact [sales@anthropol.io](mailto:sales@anthropol.io) for hardware-bound enclave keys.

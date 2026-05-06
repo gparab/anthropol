@@ -1,0 +1,3 @@
+// humanity_check.wasm STUB
+// In a production CI/CD environment, this is replaced by the actual compiled witness generator.
+console.log("Anthropol Humanity Witness Generator Loaded");

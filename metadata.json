@@ -1,0 +1,12 @@
+{
+  "name": "Remix: anthropol.io",
+  "description": "B2B Identity-as-a-Service (IDaaS) for unforgeable biological liveness verification using pulse (rPPG), depth, and physics.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "AI-Driven Liveness Detection",
+    "Zero-Knowledge Proofs",
+    "B2B SDK"
+  ]
+}

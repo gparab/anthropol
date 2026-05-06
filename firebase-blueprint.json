@@ -1,0 +1,103 @@
+{
+  "entities": {
+    "Client": {
+      "title": "B2B Client",
+      "description": "Enterprise entity utilizing the anthropol.io SDK",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Legal entity name" },
+        "tier": { "type": "string", "enum": ["standard", "enterprise"] },
+        "apiKeys": {
+          "type": "object",
+          "properties": {
+            "publicKey": { "type": "string" },
+            "secretKey": { "type": "string" },
+            "webhookUrl": { "type": "string" },
+            "lastRotated": { "type": "string", "format": "date-time" }
+          }
+        },
+        "usage": {
+          "type": "object",
+          "properties": {
+            "currentMonth": { "type": "number" },
+            "limit": { "type": "number" }
+          }
+        },
+        "legalZone": { "type": "string", "enum": ["US-EAST", "US-WEST", "EU-CENTRAL"] },
+        "privacySettings": {
+          "type": "object",
+          "properties": {
+            "purgeTelemetry": { "type": "boolean" }
+          }
+        },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "tier", "createdAt"]
+    },
+    "Verification": {
+      "title": "Liveness Verification",
+      "description": "Record of a biological liveness test",
+      "type": "object",
+      "properties": {
+        "clientId": { "type": "string", "description": "Owner of the session" },
+        "status": { "type": "string", "enum": ["passed", "failed", "processing"] },
+        "signals": {
+          "type": "object",
+          "properties": {
+            "rPPG": { "type": "number" },
+            "parallax": { "type": "number" },
+            "bpm": { "type": "number", "description": "Estimated Heart Rate" }
+          }
+        },
+        "score": { "type": "number", "description": "Aggregated humanity score" },
+        "rawSamples": { "type": "array", "items": { "type": "number" } },
+        "zkProofId": { "type": "string", "description": "Reference to the minted ZK proof" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["clientId", "status", "timestamp", "score"]
+    },
+    "GlobalStats": {
+      "title": "Global Metrics",
+      "description": "Aggregated cross-shard statistics",
+      "type": "object",
+      "properties": {
+        "totalVerifications": { "type": "number" },
+        "successRate": { "type": "number" },
+        "botInterceptions": { "type": "number" },
+        "networkLoad": { "type": "string" }
+      }
+    },
+    "WebhookLog": {
+      "title": "Webhook Delivery Log",
+      "description": "Log of automated event delivery",
+      "type": "object",
+      "properties": {
+        "clientId": { "type": "string" },
+        "url": { "type": "string" },
+        "type": { "type": "string" },
+        "status": { "type": "number" },
+        "error": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["clientId", "url", "type", "status", "timestamp"]
+    }
+  },
+  "firestore": {
+    "clients/{clientId}": {
+      "schema": "Client",
+      "description": "Organization profile"
+    },
+    "verifications/{verificationId}": {
+      "schema": "Verification",
+      "description": "Immutable verification logs"
+    },
+    "system/global": {
+      "schema": "GlobalStats",
+      "description": "Root metrics"
+    },
+    "webhook_logs/{logId}": {
+      "schema": "WebhookLog",
+      "description": "Webhook delivery historical data"
+    }
+  }
+}

@@ -1,0 +1,117 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Default Deny - Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() { return request.auth != null; }
+    function isVerifiedUser() { 
+      return isSignedIn(); 
+    }
+    function isAdmin() { return isSignedIn() && request.auth.token.email == 'parabgautam@gmail.com'; }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+
+    // --- Entity Validations ---
+    
+    function isValidClient(data) {
+      // Create requires exact keys: name, tier, apiKeys, legalZone, privacySettings, usage, createdAt
+      // But initializeClientProfile might provide fields incrementally or all at once.
+      // Based on initializeClientProfile, it provides: name, tier, apiKeys, legalZone, privacySettings, usage, createdAt. (7 keys)
+      return data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.tier in ['standard', 'enterprise'] &&
+             data.createdAt is timestamp &&
+             data.usage.currentMonth is int &&
+             data.usage.limit is int &&
+             data.apiKeys.publicKey is string &&
+             data.apiKeys.secretKey is string &&
+             data.legalZone is string &&
+             data.privacySettings.purgeTelemetry is bool;
+    }
+
+    function isValidVerification(data) {
+      return data.clientId == request.auth.uid &&
+             data.status in ['passed', 'failed', 'processing'] &&
+             data.timestamp == request.time;
+    }
+
+    function isValidWebhookLog(data) {
+      return data.clientId == request.auth.uid &&
+             data.url is string && data.url.size() <= 500 &&
+             data.type is string &&
+             data.status is int &&
+             data.timestamp == request.time;
+    }
+
+    // --- Collection Routes ---
+
+    // 1. Clients
+    match /clients/{clientId} {
+      allow get, list: if isOwner(clientId) || isAdmin();
+      allow create: if isOwner(clientId) && 
+                      isValidId(clientId) &&
+                      isValidClient(incoming()) && 
+                      incoming().createdAt == request.time;
+      
+      allow update: if (isOwner(clientId) || isAdmin()) && (
+        // Action: Update Profile Settings
+        (incoming().diff(existing()).affectedKeys().hasOnly(['name', 'privacySettings', 'apiKeys', 'legalZone']) && 
+         incoming().name is string && incoming().name.size() <= 100) ||
+        
+        // Action: Usage Increment (Master Gate relational write constraint)
+        (incoming().diff(existing()).affectedKeys().hasOnly(['usage']) && 
+         incoming().usage.currentMonth is int) ||
+        
+        // Action: Tier Upgrade
+        (incoming().diff(existing()).affectedKeys().hasOnly(['tier', 'usage']) && 
+         incoming().tier in ['standard', 'enterprise']) ||
+        
+        isAdmin()
+      );
+    }
+
+    // 2. Verifications
+    match /verifications/{verificationId} {
+      allow get: if isSignedIn() && (existing().clientId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.clientId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && 
+                      incoming().clientId == request.auth.uid && 
+                      isValidVerification(incoming());
+      // verifications are immutable
+      allow update, delete: if isAdmin();
+    }
+
+    // 3. Verifications Recovery (Failover)
+    match /verifications_recovery/{recoveryId} {
+      allow create: if isSignedIn() && 
+                      incoming().clientId == request.auth.uid && 
+                      isValidVerification(incoming());
+      allow read, delete: if isAdmin();
+    }
+
+    // 4. Webhook Logs
+    match /webhook_logs/{logId} {
+      allow get: if isSignedIn() && (existing().clientId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.clientId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && incoming().clientId == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+
+    // 5. Global Stats
+    match /system/global {
+      allow get: if isSignedIn();
+      allow update: if isSignedIn() && (
+        // Action: Increment Stats (Restricted keys)
+        incoming().diff(existing()).affectedKeys().hasAny(['totalVerifications', 'botInterceptions']) &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['totalVerifications', 'botInterceptions', 'successRate', 'networkLoad']) ||
+        isAdmin()
+      );
+    }
+  }
+}
