@@ -54,14 +54,12 @@ export const aiOracle = {
       });
 
       return JSON.parse(response.text || '{}');
-    } catch (error) {
+    } catch (error: any) {
       console.error("AI Oracle Error:", error);
-      // Fallback for demo stability if API fails or quota hit
-      return {
-        isHuman: true,
-        confidence: 0.992,
-        signals: { texture: 'natural', biological: 'stable', liveness: 'verified' }
-      };
+      if (error?.status === 429 || error?.message?.includes('429')) {
+        throw new Error('AI_ORACLE_RATE_LIMIT');
+      }
+      throw new Error('AI_ORACLE_TIMEOUT');
     }
   },
 
@@ -104,14 +102,12 @@ export const aiOracle = {
       });
 
       return JSON.parse(response.text || '{}');
-    } catch (error) {
+    } catch (error: any) {
       console.error("ID Verification Error:", error);
-      return {
-        matchScore: 0.95,
-        extractedData: { fullName: "G. PARAB", expiry: "2029-12-31", docType: "PASSPORT" },
-        isAuthentic: true,
-        summary: "Automatic validation bypassed (local fallback active)."
-      };
+      if (error?.status === 429 || error?.message?.includes('429')) {
+        throw new Error('AI_ORACLE_RATE_LIMIT');
+      }
+      throw new Error('AI_ORACLE_TIMEOUT');
     }
   }
 };

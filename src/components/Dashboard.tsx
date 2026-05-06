@@ -44,6 +44,7 @@ export const Dashboard = () => {
 
   const [hasPasskey, setHasPasskey] = useState(!!localStorage.getItem('anthropol_passkey'));
   const [analyticsData, setAnalyticsData] = useState<any[]>([]);
+  const [analyticsError, setAnalyticsError] = useState<string | null>(null);
 
   /**
    * Analytics & Data Ingestion
@@ -59,19 +60,11 @@ export const Dashboard = () => {
         }
         const data = await response.json();
         setAnalyticsData(data);
-      } catch (e) {
-        console.warn('[INFRA]: Failed to load live analytics aggregator, using client-side estimation.', e);
-        // Client-side fallback if the server is unreachable
-        if (analyticsData.length === 0) {
-          setAnalyticsData([
-            { time: '00:00', static: 10, mask: 4, human: 100 },
-            { time: '04:00', static: 12, mask: 6, human: 90 },
-            { time: '08:00', static: 40, mask: 20, human: 150 },
-            { time: '12:00', static: 30, mask: 15, human: 220 },
-            { time: '16:00', static: 25, mask: 10, human: 200 },
-            { time: '20:00', static: 15, mask: 5, human: 110 },
-          ]);
-        }
+        setAnalyticsError(null);
+      } catch (e: any) {
+        console.error('[INFRA]: Failed to load live analytics aggregator.', e);
+        setAnalyticsError(e.message || 'Network unreachable');
+        setAnalyticsData([]);
       }
     };
     fetchAnalytics();
@@ -300,10 +293,19 @@ export const Dashboard = () => {
                     <p className="mono text-[10px] uppercase text-brand-secondary tracking-widest font-bold">24-Hour Distribution // Live Edge Logs</p>
                   </div>
                 </div>
-                <div className="h-64 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={analyticsData}>
-                      <defs>
+                <div className="h-64 w-full relative">
+                  {analyticsError ? (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center space-y-4 bg-red-500/5 rounded-xl border border-red-500/20">
+                      <ShieldCheck className="text-red-500" size={32} />
+                      <div className="text-center">
+                        <p className="mono font-bold uppercase text-red-500 text-xs tracking-widest">Network Outage</p>
+                        <p className="text-brand-secondary text-sm mt-1">{analyticsError}</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={analyticsData}>
+                        <defs>
                         <linearGradient id="colorHuman" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="5%" stopColor="var(--color-brand-accent)" stopOpacity={0.2}/>
                           <stop offset="95%" stopColor="var(--color-brand-accent)" stopOpacity={0}/>
@@ -320,6 +322,7 @@ export const Dashboard = () => {
                       <Area type="step" dataKey="mask" stroke="#e06344" fill="#e0634411" strokeWidth={1.5} name="Synthetic Attack" />
                     </AreaChart>
                   </ResponsiveContainer>
+                  )}
                 </div>
               </div>
 

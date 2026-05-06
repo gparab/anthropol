@@ -123,19 +123,6 @@ self.onmessage = async (e: MessageEvent) => {
   let result = baseConfidence * rhythmScore;
   let status: 'valid' | 'suspicious' | 'static' = rhythmScore > 0.65 ? 'valid' : 'suspicious';
 
-  if (variance < 0.00001) {
-    result = 0.02;
-    status = 'static';
-  } else if (variance > 800) {
-    result = 0.12;
-    status = 'suspicious';
-  }
-
-  if (totalMovement < 0.2) {
-     result = 0.05;
-     status = 'static';
-  }
-
   // Final clamp and precision normalization
   const confidence = Math.min(0.998, parseFloat(result.toFixed(4)));
 

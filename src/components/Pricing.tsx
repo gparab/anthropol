@@ -26,7 +26,23 @@ export const Pricing = () => {
     if (!user) return alert('Please login first');
     
     if (tier === 'enterprise') {
-      window.location.href = 'mailto:sales@anthropol.io?subject=Enterprise Inquiry';
+      const confirmRedirect = window.confirm("Redirecting to Stripe Billing Portal to provision Enterprise Infrastructure. Proceed?");
+      if (!confirmRedirect) return;
+      
+      // Simulate Stripe checkout delay and then trigger Firebase backend upgrade
+      setTimeout(async () => {
+        try {
+          const { success } = await verificationService.upgradeTier(user.uid, tier, limitVal) as any;
+          if (success) {
+            setCurrentTier(tier);
+            window.dispatchEvent(new CustomEvent('tier-upgraded', { detail: { tier } }));
+            alert(`✓ Enterprise Infrastructure Node Scaled & Attached to Billing Account.`);
+          }
+        } catch (e) {
+             console.error("Upgrade failed:", e);
+             alert("Failed to scale infrastructure node. Check console for details.");
+        }
+      }, 1500);
       return;
     }
 

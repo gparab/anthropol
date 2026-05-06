@@ -32,7 +32,6 @@ export const NavRail = ({ currentView, setView }: NavRailProps) => {
 
   const navItems = [
     { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-    { id: 'features', icon: Sparkles, label: 'Features' },
     { id: 'analytics', icon: BarChart3, label: 'Analytics Hub' },
     { id: 'verification_demo', icon: Eye, label: 'SDK Live' },
     { id: 'developer_assets', icon: Terminal, label: 'Infrastructure' },

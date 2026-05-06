@@ -4,6 +4,7 @@ import { SignalMonitor } from './SignalMonitor';
 import { motion, AnimatePresence } from 'motion/react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { ethers } from 'ethers';
 
 interface ProofExplorerProps {
   isOpen: boolean;
@@ -70,8 +71,9 @@ export const ProofExplorer = ({ isOpen, onClose, proof }: ProofExplorerProps) =>
       doc.setFont('courier', 'bold');
       doc.text('DIGITAL SIGNATURE ATTESTATION', 25, finalY + 30);
       doc.setFontSize(6);
-      doc.text(Array(64).fill('X').join(''), 25, finalY + 35);
-      doc.text(Array(64).fill('Y').join(''), 25, finalY + 38);
+      
+      const payloadHash = ethers.id(JSON.stringify(proof));
+      doc.text(payloadHash, 25, finalY + 35);
 
       doc.save(`Anthropolo_Proof_${proofId.substring(0, 8)}.pdf`);
     } catch (error) {

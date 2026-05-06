@@ -150,13 +150,6 @@ export const verificationService = {
    * @param zone - Target regulatory jurisdiction.
    */
   async logVerification(data: VerificationResult, zone: LegalZone = 'US-EAST') {
-    // DEMO & AUTH GUARD: Strictly skip persistence for demo sessions or if the user lost their session.
-    // This prevents "Missing or insufficient permissions" errors from flooding logs during demonstrations.
-    if (data.clientId === 'DEMO_CLIENT' || !auth.currentUser) {
-      console.log('[PROXIMITY]: Session processed locally. Global ledger synchronization skipped.');
-      return 'demo_id_' + Math.random().toString(36).substring(7);
-    }
-
     const targetDb = this.getRegionalDb(zone);
     try {
       // PRODUCTION GUARD: Ensure no non-serializable objects enter state
@@ -408,7 +401,7 @@ export const verificationService = {
    * Aggregates stats for the analytics hub dashboard.
    * Dynamically filters regional verifications to compute client-specific KPIs.
    */
-  subscribeToClientAnalytics(clientId: string, callback: (stats: any) => void, zone: LegalZone = 'US-EAST') {
+  subscribeToClientAnalytics(clientId: string, callback: (stats: any) => void, onError?: (error: string) => void, zone: LegalZone = 'US-EAST') {
     const path = 'verifications';
     const targetDb = this.getRegionalDb(zone);
     const q = query(collection(targetDb, path), where('clientId', '==', clientId));
@@ -444,7 +437,12 @@ export const verificationService = {
         trend
       });
     }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, path);
+      if (onError) onError(error instanceof Error ? error.message : String(error));
+      try {
+        handleFirestoreError(error, OperationType.LIST, path);
+      } catch (e) {
+        // Handled or will be caught by global boundary
+      }
     });
   },
 

@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { motion } from 'motion/react';
 import { Bug, ShieldAlert, CheckCircle, Upload, Play, AlertTriangle, Terminal, Activity, RefreshCw } from 'lucide-react';
 import { aiOracle } from '../lib/gemini';
+import axios from 'axios';
 
 const THREAT_PACKETS = [
   { 
@@ -31,22 +32,52 @@ export const StressTest = () => {
   const [selectedThreat, setSelectedThreat] = useState<string | null>(null);
   const [isTesting, setIsTesting] = useState(false);
   const [result, setResult] = useState<any | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const runAudit = async (threatId: string) => {
     setIsTesting(true);
     setSelectedThreat(threatId);
+    setResult(null);
+    setErrorMsg(null);
     
-    await new Promise(r => setTimeout(r, 2000));
-    
-    const mockResult = {
-      outcome: 'REJECTED',
-      confidence: 0.99,
-      signal: 'Screen-texture detected (Moiré pattern detected in 440nm band)',
-      vector: threatId.includes('deepfake') ? 'Synthetic Articulation' : 'Non-biological reflectance'
-    };
-    
-    setResult(mockResult);
-    setIsTesting(false);
+    try {
+      const response = await axios.post('/api/stress-test', { threatId });
+      setResult(response.data);
+    } catch (error: any) {
+      setErrorMsg(error.response?.data?.error || error.message);
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsTesting(true);
+    setSelectedThreat('upload');
+    setResult(null);
+    setErrorMsg(null);
+
+    try {
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        const base64Data = reader.result?.toString().split(',')[1];
+        if (base64Data) {
+          const response = await axios.post('/api/stress-test', {
+            imageBase64: base64Data,
+            mimeType: file.type || 'image/jpeg'
+          });
+          setResult(response.data);
+        }
+        setIsTesting(false);
+      };
+      reader.readAsDataURL(file);
+    } catch (error: any) {
+      setErrorMsg(error.message);
+      setIsTesting(false);
+    }
   };
 
   return (
@@ -92,7 +123,20 @@ export const StressTest = () => {
               </button>
             ))}
             
-            <button className="w-full p-8 border-2 border-dashed border-brand-primary/5 rounded-2xl flex flex-col items-center gap-4 hover:bg-brand-surface hover:border-brand-accent transition-all group">
+            <input 
+              type="file" 
+              ref={fileInputRef} 
+              className="hidden" 
+              accept="image/*,video/*" 
+              onChange={handleFileUpload}
+            />
+            <button 
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isTesting}
+              className={`w-full p-8 border-2 border-dashed rounded-2xl flex flex-col items-center gap-4 transition-all group ${
+                selectedThreat === 'upload' ? 'bg-brand-surface border-brand-accent' : 'border-brand-primary/5 hover:bg-brand-surface hover:border-brand-accent'
+              }`}
+            >
               <div className="w-12 h-12 rounded-full bg-brand-surface flex items-center justify-center group-hover:bg-brand-accent transition-colors">
                 <Upload size={20} className="opacity-40 group-hover:opacity-100 group-hover:text-brand-primary transition-all" />
               </div>
@@ -145,13 +189,13 @@ export const StressTest = () => {
                 className="w-full h-full flex flex-col"
                >
                  <div className="flex-1 space-y-10">
-                   <div className="flex items-center gap-6 p-8 bg-red-500 rounded-2xl text-white shadow-2xl shadow-red-500/20">
+                   <div className={`flex items-center gap-6 p-8 rounded-2xl text-white shadow-2xl ${result.outcome === 'PASSED' ? 'bg-brand-success shadow-brand-success/20' : 'bg-red-500 shadow-red-500/20'}`}>
                      <div className="p-4 bg-white/20 rounded-xl">
-                       <AlertTriangle size={32} />
+                       {result.outcome === 'PASSED' ? <CheckCircle size={32} /> : <AlertTriangle size={32} />}
                      </div>
                      <div className="space-y-1">
                        <p className="mono text-[10px] uppercase font-bold opacity-70 tracking-widest">Protocol Response</p>
-                       <p className="text-4xl font-black uppercase tracking-tighter leading-none italic">Rejected</p>
+                       <p className="text-4xl font-black uppercase tracking-tighter leading-none italic">{result.outcome}</p>
                      </div>
                    </div>
 
@@ -172,11 +216,19 @@ export const StressTest = () => {
                        <h4 className="mono text-[11px] font-bold uppercase tracking-widest">Heuristic Forensics</h4>
                      </div>
                      <p className="text-sm font-medium leading-relaxed italic opacity-80">
-                        "The signal shows static spectral noise consistent with screen re-capture. High variance in sub-pixel RGB distribution confirms non-biological entity."
+                        "{result.signal}"
                      </p>
                    </div>
                  </div>
                </motion.div>
+             )}
+
+             {errorMsg && !isTesting && (
+               <div className="w-full text-center space-y-4 text-red-500 bg-red-500/10 p-6 rounded-xl border border-red-500/20">
+                 <AlertTriangle size={32} className="mx-auto" />
+                 <p className="mono text-[11px] font-bold uppercase tracking-widest">Oracle Error</p>
+                 <p className="text-xs">{errorMsg}</p>
+               </div>
              )}
           </div>
         </section>

@@ -14,7 +14,7 @@ import {
   Scale
 } from 'lucide-react';
 
-export function BusinessCases() {
+export function BusinessCases({ onNavigate }: { onNavigate?: (view: string) => void }) {
   const cases = [
     {
       title: "DeFi Governance",
@@ -140,7 +140,12 @@ export function BusinessCases() {
                </p>
                <div className="space-y-4 pt-4">
                   <input type="text" placeholder="Organizational Domain" className="w-full px-6 py-4 bg-brand-surface rounded-xl border border-brand-primary/5 mono text-xs uppercase" />
-                  <button className="w-full bg-brand-primary text-brand-paper py-5 rounded-xl font-bold uppercase tracking-widest text-xs hover:bg-brand-accent hover:text-brand-primary transition-all">
+                  <button 
+                    onClick={() => {
+                       alert('Consultation request queued. An architect will contact your organizational domain.');
+                       if (onNavigate) onNavigate('pricing');
+                    }}
+                    className="w-full bg-brand-primary text-brand-paper py-5 rounded-xl font-bold uppercase tracking-widest text-xs hover:bg-brand-accent hover:text-brand-primary transition-all">
                     Initiate Consultation
                   </button>
                </div>
@@ -152,10 +157,14 @@ export function BusinessCases() {
       <section className="px-6 text-center space-y-12">
          <h2 className="text-4xl md:text-6xl font-bold uppercase tracking-tighter leading-none">Restore Integrity to Your <br/> <span className="text-brand-accent italic">Ecosystem</span></h2>
          <div className="flex flex-col sm:flex-row justify-center gap-6">
-            <button className="bg-brand-primary text-brand-paper px-12 py-5 rounded-full mono text-sm font-bold uppercase hover:bg-brand-accent hover:text-brand-primary transition-all flex items-center justify-center gap-3">
+            <button 
+              onClick={() => onNavigate && onNavigate('auth')}
+              className="bg-brand-primary text-brand-paper px-12 py-5 rounded-full mono text-sm font-bold uppercase hover:bg-brand-accent hover:text-brand-primary transition-all flex items-center justify-center gap-3">
                Register for Enterprise Node <ArrowRight size={18} />
             </button>
-            <button className="bg-brand-surface border border-brand-primary/10 text-brand-primary px-12 py-5 rounded-full mono text-sm font-bold uppercase hover:bg-white transition-all flex items-center justify-center gap-3">
+            <button 
+              onClick={() => onNavigate && onNavigate('product')}
+              className="bg-brand-surface border border-brand-primary/10 text-brand-primary px-12 py-5 rounded-full mono text-sm font-bold uppercase hover:bg-white transition-all flex items-center justify-center gap-3">
                Review Case Library
             </button>
          </div>

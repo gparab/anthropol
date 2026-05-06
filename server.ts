@@ -14,6 +14,8 @@ import axios from 'axios';
 import admin from 'firebase-admin';
 import rateLimit from 'express-rate-limit';
 import { ethers } from 'ethers';
+import os from 'os';
+import { GoogleGenAI } from '@google/genai';
 import firebaseConfig from './firebase-applet-config.json';
 
 // Initialize Firebase Admin with explicit Project ID validation
@@ -101,6 +103,130 @@ async function startServer() {
   });
 
   /**
+   * GET /api/system/health
+   * Returns real CPU and memory metrics from the host operating system.
+   */
+  app.get('/api/system/health', (_req, res) => {
+    try {
+      const cpus = os.cpus();
+      const freemem = os.freemem();
+      const totalmem = os.totalmem();
+
+      let idleTime = 0;
+      let totalTime = 0;
+      cpus.forEach((cpu) => {
+        for (const type in cpu.times) {
+          totalTime += cpu.times[type as keyof typeof cpu.times];
+        }
+        idleTime += cpu.times.idle;
+      });
+
+      const cpuLoad = 100 - Math.round(100 * idleTime / totalTime);
+      const memLoad = Math.round(100 * (1 - freemem / totalmem));
+
+      res.json({
+        cpu: cpuLoad,
+        mem: memLoad,
+        freemem,
+        totalmem
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to fetch health' });
+    }
+  });
+
+  /**
+   * POST /api/system/lockdown
+   * Writes the lockdown flag to the global system document in Firestore.
+   */
+  app.post('/api/system/lockdown', async (req, res) => {
+    try {
+      if (!admin.apps.length) throw new Error('ADMIN_NOT_INIT');
+      const db = admin.firestore();
+      await db.collection('system').doc('global').set({ isLockedDown: true }, { merge: true });
+      res.json({ success: true, isLockedDown: true });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Lockdown failed' });
+    }
+  });
+
+  /**
+   * GET /api/system/lockdown
+   * Reads the lockdown flag.
+   */
+  app.get('/api/system/lockdown', async (req, res) => {
+    try {
+      if (!admin.apps.length) return res.json({ isLockedDown: false });
+      const db = admin.firestore();
+      const doc = await db.collection('system').doc('global').get();
+      res.json({ isLockedDown: doc.data()?.isLockedDown || false });
+    } catch (error) {
+      res.json({ isLockedDown: false });
+    }
+  });
+
+  /**
+   * POST /api/stress-test
+   * Evaluates adversarial assets using Google Gemini to identify deepfakes or broadcast attacks.
+   */
+  app.post('/api/stress-test', async (req, res) => {
+    const { threatId, imageBase64, mimeType } = req.body;
+    
+    try {
+      const gapiKey = process.env.GEMINI_API_KEY;
+      if (!gapiKey) {
+        throw new Error('GEMINI_API_KEY not configured.');
+      }
+      const ai = new GoogleGenAI({ apiKey: gapiKey });
+
+      let prompt = `You are a forensic computer vision system. 
+Analyze the provided biometric presentation or threat ID to determine if it is an adversarial attack (e.g., deepfake, presentation mask, or screen rebroadcast). 
+Output ONLY valid JSON matching this schema exactly:
+{
+  "outcome": "REJECTED" | "PASSED",
+  "confidence": number (0.0 to 1.0),
+  "signal": "string describing the forensic evidence",
+  "vector": "string categorizing the attack vector"
+}`;
+
+      let contents: any[] = [];
+      
+      if (imageBase64 && mimeType) {
+        contents = [
+          prompt,
+          {
+            inlineData: {
+              data: imageBase64,
+              mimeType: mimeType
+            }
+          }
+        ];
+      } else {
+        contents = [
+          prompt,
+          `Threat ID to synthesize a simulation for: ${threatId}. Analyze the theoretical properties of this attack and return a forensic JSON response rejecting it.`
+        ];
+      }
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents,
+        config: {
+          responseMimeType: 'application/json',
+        }
+      });
+
+      const text = response.text || "{}";
+      const result = JSON.parse(text);
+      res.json(result);
+    } catch (error: any) {
+      console.error('[INFRA] /api/stress-test error:', error);
+      res.status(500).json({ error: 'Stress test failed', details: error.message });
+    }
+  });
+
+  /**
    * GET /api/analytics
    * Aggregates verification events into hourly buckets for dashboard visualization.
    */
@@ -149,16 +275,8 @@ async function startServer() {
         { time: '00:00', static: 0, mask: 0, human: 0 }
       ]);
     } catch (error) {
-      console.warn('[INFRA]: Analytics aggregator using synthetic fallback:', error instanceof Error ? error.message : 'Unknown');
-      // Synthetic fallback for local dev or misconfigured environments
-      res.json([
-        { time: '00:00', static: 12, mask: 5, human: 85 },
-        { time: '04:00', static: 15, mask: 8, human: 70 },
-        { time: '08:00', static: 45, mask: 22, human: 120 },
-        { time: '12:00', static: 32, mask: 18, human: 210 },
-        { time: '16:00', static: 28, mask: 12, human: 180 },
-        { time: '20:00', static: 18, mask: 6, human: 95 },
-      ]);
+      console.warn('[INFRA]: Analytics aggregator query failed:', error instanceof Error ? error.message : 'Unknown');
+      res.status(500).json({ error: 'Failed to fetch analytics' });
     }
   });
 

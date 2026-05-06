@@ -139,7 +139,7 @@ export default function App() {
               <ArrowRight size={14} className="rotate-180" /> Back to Landing
             </button>
           </nav>
-          <Whitepaper />
+          <Whitepaper onNavigate={setView} />
         </div>
       );
     }
@@ -160,7 +160,7 @@ export default function App() {
             </button>
           </nav>
           <div className="px-8 md:px-12 lg:px-16">
-            <Features />
+            <Features onNavigate={setView} />
           </div>
         </div>
       );
@@ -182,7 +182,7 @@ export default function App() {
             </button>
           </nav>
           <div className="px-8 md:px-12 lg:px-16">
-            <Product />
+            <Product onNavigate={setView} />
           </div>
         </div>
       );
@@ -204,7 +204,7 @@ export default function App() {
             </button>
           </nav>
           <div className="px-8 md:px-12 lg:px-16">
-            <BusinessCases />
+            <BusinessCases onNavigate={setView} />
           </div>
         </div>
       );
@@ -226,7 +226,7 @@ export default function App() {
             </button>
           </nav>
           <div className="px-8 md:px-12 lg:px-16">
-            <DeveloperExperience />
+            <DeveloperExperience onNavigate={setView} />
           </div>
         </div>
       );
@@ -538,11 +538,11 @@ export default function App() {
               </AdminRoute>
             )}
             {view === 'pricing' && <Pricing />}
-            {view === 'whitepaper' && <Whitepaper />}
-            {view === 'features' && <Features />}
-            {view === 'product' && <Product />}
-            {view === 'business_cases' && <BusinessCases />}
-            {view === 'developer_experience' && <DeveloperExperience />}
+            {view === 'whitepaper' && <Whitepaper onNavigate={(v) => setView(v as AppView)} />}
+            {view === 'features' && <Features onNavigate={(v) => setView(v as AppView)} />}
+            {view === 'product' && <Product onNavigate={(v) => setView(v as AppView)} />}
+            {view === 'business_cases' && <BusinessCases onNavigate={(v) => setView(v as AppView)} />}
+            {view === 'developer_experience' && <DeveloperExperience onNavigate={(v) => setView(v as AppView)} />}
             {view === 'profile' && <ProfilePage />}
             
             {view === 'verification_demo' && (

@@ -2,7 +2,7 @@ import React from 'react';
 import { BookOpen, Shield, Cpu, Zap, Lock, Globe, ArrowRight, CheckCircle2, Activity, Eye } from 'lucide-react';
 import { motion } from 'motion/react';
 
-export const Whitepaper = () => {
+export const Whitepaper = ({ onNavigate }: { onNavigate?: (view: string) => void }) => {
   return (
     <div className="bg-brand-paper min-h-screen pt-32 pb-40 px-8 selection:bg-brand-accent selection:text-brand-primary">
       <div className="max-w-7xl mx-auto space-y-40">
@@ -226,7 +226,9 @@ export const Whitepaper = () => {
                 <h4 className="text-7xl font-bold uppercase tracking-tighter leading-[0.9]">Anchor Your<br/>Network.</h4>
                 <p className="text-2xl font-medium text-brand-primary/60 max-w-sm leading-tight">Scale humanity-first protocols with our enterprise-grade SDK stack.</p>
               </div>
-              <button className="bg-brand-primary text-brand-paper px-16 py-10 rounded-3xl text-2xl font-bold uppercase tracking-tighter hover:bg-black transition-all flex items-center gap-8 group shadow-2xl shadow-brand-primary/40 z-10 shrink-0">
+              <button 
+                onClick={() => onNavigate && onNavigate('auth')}
+                className="bg-brand-primary text-brand-paper px-16 py-10 rounded-3xl text-2xl font-bold uppercase tracking-tighter hover:bg-black transition-all flex items-center gap-8 group shadow-2xl shadow-brand-primary/40 z-10 shrink-0">
                 Initialize Stack 
                 <ArrowRight size={32} className="group-hover:translate-x-2 transition-transform" />
               </button>

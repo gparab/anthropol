@@ -13,7 +13,7 @@ import {
   Radar
 } from 'lucide-react';
 
-export function Product() {
+export function Product({ onNavigate }: { onNavigate?: (view: string) => void }) {
   const deepDive = [
     {
       id: '01',
@@ -169,11 +169,15 @@ export function Product() {
             <p className="text-xl opacity-60 leading-relaxed font-medium">Protect your network from the synthetic takeover. Deploy Anthropol immunity today.</p>
          </div>
          <div className="flex flex-col sm:flex-row justify-center gap-6">
-            <button className="bg-brand-accent text-brand-primary px-12 py-5 rounded-full mono text-sm font-bold uppercase hover:bg-white transition-all flex items-center justify-center gap-3">
-               Download SDK Specs <ArrowRight size={18} />
+            <button 
+               onClick={() => onNavigate && onNavigate('auth')}
+               className="bg-brand-accent text-brand-primary px-12 py-5 rounded-full mono text-sm font-bold uppercase hover:bg-white transition-all flex items-center justify-center gap-3">
+               Register for SDK Access <ArrowRight size={18} />
             </button>
-            <button className="bg-white/5 border border-white/10 text-white px-12 py-5 rounded-full mono text-sm font-bold uppercase hover:bg-white/10 transition-all flex items-center justify-center gap-3">
-               Talk to an Identity Architect
+            <button 
+               onClick={() => onNavigate && onNavigate('pricing')}
+               className="bg-white/5 border border-white/10 text-white px-12 py-5 rounded-full mono text-sm font-bold uppercase hover:bg-white/10 transition-all flex items-center justify-center gap-3">
+               View Enterprise Pricing
             </button>
          </div>
       </section>

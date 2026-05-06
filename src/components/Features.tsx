@@ -13,7 +13,7 @@ import {
   Sparkles
 } from 'lucide-react';
 
-export function Features() {
+export function Features({ onNavigate }: { onNavigate?: (view: string) => void }) {
   const businessBenefits = [
     {
       title: "Eliminate Synthetic Fraud",
@@ -177,18 +177,12 @@ export function Features() {
         </div>
         <h2 className="text-4xl md:text-6xl font-bold uppercase tracking-tighter">Ready to Scale Humanity?</h2>
         <div className="flex flex-col sm:flex-row justify-center gap-6">
-           <div className="flex items-center gap-4 px-8 py-4 bg-brand-surface rounded-2xl border border-brand-primary/5">
-              <CheckCircle2 className="text-brand-success" size={24} />
-              <span className="text-lg font-bold uppercase tracking-tighter">SLA Guaranteed</span>
-           </div>
-           <div className="flex items-center gap-4 px-8 py-4 bg-brand-surface rounded-2xl border border-brand-primary/5">
-              <CheckCircle2 className="text-brand-success" size={24} />
-              <span className="text-lg font-bold uppercase tracking-tighter">GDPR Compliant</span>
-           </div>
-           <div className="flex items-center gap-4 px-8 py-4 bg-brand-surface rounded-2xl border border-brand-primary/5">
-              <CheckCircle2 className="text-brand-success" size={24} />
-              <span className="text-lg font-bold uppercase tracking-tighter">SOC 2 Ready</span>
-           </div>
+           <button 
+             onClick={() => onNavigate && onNavigate('auth')}
+             className="flex justify-center items-center gap-4 px-12 py-5 bg-brand-primary text-brand-paper hover:bg-brand-accent hover:text-brand-primary transition-all rounded-full border border-brand-primary/5 mono uppercase font-bold text-sm shadow-xl"
+           >
+              Deploy Institutional Sandbox
+           </button>
         </div>
       </section>
     </div>

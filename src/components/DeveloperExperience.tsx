@@ -14,7 +14,7 @@ import {
   Activity
 } from 'lucide-react';
 
-export function DeveloperExperience() {
+export function DeveloperExperience({ onNavigate }: { onNavigate?: (view: string) => void }) {
   const steps = [
     {
       id: '01',
@@ -236,10 +236,14 @@ if (isValid) {
             <p className="text-xl text-brand-secondary opacity-60">Join 1,200+ organizations building human-centric ecosystems.</p>
          </div>
          <div className="flex flex-col sm:flex-row justify-center gap-6">
-            <button className="bg-brand-primary text-brand-paper px-12 py-5 rounded-full mono text-sm font-bold uppercase hover:bg-brand-accent hover:text-brand-primary transition-all flex items-center justify-center gap-3">
+            <button 
+              onClick={() => onNavigate && onNavigate('auth')}
+              className="bg-brand-primary text-brand-paper px-12 py-5 rounded-full mono text-sm font-bold uppercase hover:bg-brand-accent hover:text-brand-primary transition-all flex items-center justify-center gap-3">
                Register Node <ArrowRight size={18} />
             </button>
-            <button className="bg-brand-surface border border-brand-primary/10 text-brand-primary px-12 py-5 rounded-full mono text-sm font-bold uppercase hover:bg-white transition-all flex items-center justify-center gap-3">
+            <button 
+              onClick={() => onNavigate && onNavigate('whitepaper')}
+              className="bg-brand-surface border border-brand-primary/10 text-brand-primary px-12 py-5 rounded-full mono text-sm font-bold uppercase hover:bg-white transition-all flex items-center justify-center gap-3">
                <MessageSquare size={18} /> Join Developer Discord
             </button>
          </div>

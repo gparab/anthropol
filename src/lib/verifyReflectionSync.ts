@@ -8,10 +8,61 @@ export interface VerificationResult {
 }
 
 /**
+ * Computes the Discrete Fourier Transform (DFT) for a real signal.
+ */
+function computeDFT(signal: number[]) {
+  const N = signal.length;
+  const real = new Float32Array(N);
+  const imag = new Float32Array(N);
+  for (let k = 0; k < N; k++) {
+    for (let n = 0; n < N; n++) {
+      const angle = (2 * Math.PI * k * n) / N;
+      real[k] += signal[n] * Math.cos(angle);
+      imag[k] -= signal[n] * Math.sin(angle);
+    }
+  }
+  return { real, imag };
+}
+
+/**
+ * Computes the zero-lag cross-correlation in the frequency domain using the Cross-Power Spectrum.
+ */
+function frequencyDomainCrossCorrelation(observed: number[], expected: number[]): number {
+  const N = Math.min(observed.length, expected.length);
+  if (N === 0) return 0;
+
+  // Detrend
+  const meanObs = observed.reduce((a, b) => a + b, 0) / N;
+  const meanExp = expected.reduce((a, b) => a + b, 0) / N;
+  
+  const obsDetrended = observed.slice(0, N).map(v => v - meanObs);
+  const expDetrended = expected.slice(0, N).map(v => v - meanExp);
+  
+  const X = computeDFT(obsDetrended);
+  const Y = computeDFT(expDetrended);
+  
+  let crossPowerRealSum = 0;
+  let powerX = 0;
+  let powerY = 0;
+  
+  for (let k = 0; k < N; k++) {
+    // S_xy = X(k) * conj(Y(k))
+    const realPart = X.real[k] * Y.real[k] + X.imag[k] * Y.imag[k];
+    crossPowerRealSum += realPart;
+    
+    powerX += X.real[k] * X.real[k] + X.imag[k] * X.imag[k];
+    powerY += Y.real[k] * Y.real[k] + Y.imag[k] * Y.imag[k];
+  }
+  
+  if (powerX === 0 || powerY === 0) return 0;
+  return crossPowerRealSum / Math.sqrt(powerX * powerY);
+}
+
+/**
  * verifyReflectionSync
  * 
  * Validates the correlation between the emitted illumination sequence 
- * and the reflected spectral changes in the camera feed.
+ * and the reflected spectral changes in the camera feed using Frequency-Domain Cross-Correlation.
  * 
  * Defeats Replay Attacks where a static monitor or pre-recorded video 
  * is used, as the pre-recorded actor will not show the correct 
@@ -26,48 +77,49 @@ export const verifyReflectionSync = (
   }
 
   const startT = samples[0].timestamp;
-  let correlationScore = 0;
-  let validSteps = 0;
+  
+  // Reconstruct the expected emitted signal over the captured sample timeline
+  const expectedR: number[] = [];
+  const expectedG: number[] = [];
+  const expectedB: number[] = [];
+  const observedR: number[] = [];
+  const observedG: number[] = [];
+  const observedB: number[] = [];
 
-  sequence.steps.forEach(step => {
-    // Find samples captured during this specific challenge step
-    const stepSamples = samples.filter(s => {
-      const relativeT = s.timestamp - startT;
-      return relativeT >= step.startTime && relativeT < (step.startTime + step.duration);
-    });
+  for (const s of samples) {
+    const relativeT = s.timestamp - startT;
+    // Find which step is active at relativeT
+    const activeStep = sequence.steps.find(
+      step => relativeT >= step.startTime && relativeT < (step.startTime + step.duration)
+    );
 
-    if (stepSamples.length < 5) return;
+    let targetR = 0, targetG = 0, targetB = 0;
+    if (activeStep) {
+      const hex = activeStep.color.replace('#', '');
+      targetR = parseInt(hex.substring(0, 2), 16) / 255;
+      targetG = parseInt(hex.substring(2, 4), 16) / 255;
+      targetB = parseInt(hex.substring(4, 6), 16) / 255;
+    }
 
-    // Calculate mean RGB shift during the step
-    const rMean = stepSamples.reduce((acc, s) => acc + s.r, 0) / stepSamples.length;
-    const gMean = stepSamples.reduce((acc, s) => acc + s.g, 0) / stepSamples.length;
-    const bMean = stepSamples.reduce((acc, s) => acc + s.b, 0) / stepSamples.length;
+    expectedR.push(targetR);
+    expectedG.push(targetG);
+    expectedB.push(targetB);
+    observedR.push(s.r);
+    observedG.push(s.g);
+    observedB.push(s.b);
+  }
 
-    // Simplified spectral matching
-    // If the emitted light was Cyan (B+G), we expect shifts in G and B channels
-    const hex = step.color.replace('#', '');
-    const targetR = parseInt(hex.substring(0, 2), 16) / 255;
-    const targetG = parseInt(hex.substring(2, 4), 16) / 255;
-    const targetB = parseInt(hex.substring(4, 6), 16) / 255;
+  // Calculate frequency-domain cross-correlation per channel
+  const corrR = Math.max(0, frequencyDomainCrossCorrelation(observedR, expectedR));
+  const corrG = Math.max(0, frequencyDomainCrossCorrelation(observedG, expectedG));
+  const corrB = Math.max(0, frequencyDomainCrossCorrelation(observedB, expectedB));
 
-    // Check if the dominant reflection channel matches the target color's spectral peak
-    const dominantChannel = Math.max(targetR, targetG, targetB);
-    const observedDominant = Math.max(rMean, gMean, bMean);
-
-    // This is a simplified heuristic for the prototype
-    // In a production system, this would use cross-correlation in the frequency domain
-    if (dominantChannel === targetR && rMean > gMean && rMean > bMean) correlationScore++;
-    else if (dominantChannel === targetG && gMean > rMean && gMean > bMean) correlationScore++;
-    else if (dominantChannel === targetB && bMean > rMean && bMean > gMean) correlationScore++;
-    
-    validSteps++;
-  });
-
-  const finalScore = validSteps > 0 ? correlationScore / validSteps : 0;
+  // The final score is the average cross-correlation across active channels
+  const finalScore = (corrR + corrG + corrB) / 3;
   
   return {
     livenessScore: finalScore,
-    isPassed: finalScore > 0.6,
-    reason: finalScore > 0.6 ? "Spectral sync confirmed" : "Illumination reflection mismatch (Possible Replay Attack)"
+    isPassed: finalScore > 0.4, // Threshold for frequency-domain correlation
+    reason: finalScore > 0.4 ? "Spectral sync confirmed via frequency cross-correlation" : "Illumination reflection mismatch (Possible Replay Attack)"
   };
 };

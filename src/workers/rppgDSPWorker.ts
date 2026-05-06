@@ -22,6 +22,8 @@ const rBuffer = new Float32Array(WINDOW_SIZE);
 const gBuffer = new Float32Array(WINDOW_SIZE);
 const bBuffer = new Float32Array(WINDOW_SIZE);
 const processedBuffer = new Float32Array(WINDOW_SIZE);
+const xProj = new Float32Array(WINDOW_SIZE);
+const yProj = new Float32Array(WINDOW_SIZE);
 
 // Butterworth Filter Coefficients (0.7Hz - 3.0Hz at 30fps)
 // Calculated for 2nd order Butterworth
@@ -63,17 +65,37 @@ function processPOS(r: Float32Array, g: Float32Array, b: Float32Array): void {
   // 2. Temporal Normalization and Projection
   // X = G/Gn - B/Bn
   // Y = G/Gn + B/Bn - 2*(R/Rn)
+  let xSum = 0;
+  let ySum = 0;
+
   for (let i = 0; i < n; i++) {
     const rNorm = r[i] / rMean;
     const gNorm = g[i] / gMean;
     const bNorm = b[i] / bMean;
 
-    const x = gNorm - bNorm;
-    const y = gNorm + bNorm - 2 * rNorm;
+    xProj[i] = gNorm - bNorm;
+    yProj[i] = gNorm + bNorm - 2 * rNorm;
     
-    // In simplified POS, H = X + (std(X)/std(Y)) * Y
-    // For robust clinical deployment, we use the orthogonal projection directly.
-    processedBuffer[i] = x + y; 
+    xSum += xProj[i];
+    ySum += yProj[i];
+  }
+
+  const xMean = xSum / n;
+  const yMean = ySum / n;
+
+  let xVarSum = 0;
+  let yVarSum = 0;
+  for (let i = 0; i < n; i++) {
+    xVarSum += (xProj[i] - xMean) * (xProj[i] - xMean);
+    yVarSum += (yProj[i] - yMean) * (yProj[i] - yMean);
+  }
+
+  const xStd = Math.sqrt(xVarSum / (n - 1) || 1e-8);
+  const yStd = Math.sqrt(yVarSum / (n - 1) || 1e-8);
+  const alpha = xStd / yStd;
+
+  for (let i = 0; i < n; i++) {
+    processedBuffer[i] = xProj[i] + alpha * yProj[i];
   }
 
   // 3. Bandpass Filtering

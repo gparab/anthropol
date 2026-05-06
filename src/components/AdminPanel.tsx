@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Database, Search, ShieldAlert, BarChart3, TrendingUp } from 'lucide-react';
+import { Database, Search, ShieldAlert, BarChart3, TrendingUp, Lock } from 'lucide-react';
 import { verificationService } from '../lib/services';
+import axios from 'axios';
 
 /**
  * Global Admin Control Plane
@@ -18,8 +19,9 @@ export const AdminPanel = () => {
   });
   const [recentClients, setRecentClients] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [systemLoad, setSystemLoad] = useState({ cpu: 12, mem: 64 });
+  const [systemLoad, setSystemLoad] = useState({ cpu: 0, mem: 0 });
   const [isLockingDown, setIsLockingDown] = useState(false);
+  const [isLockedDown, setIsLockedDown] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -35,23 +37,43 @@ export const AdminPanel = () => {
     };
     fetchData();
 
-    // Simulate real-time load
-    const interval = setInterval(() => {
-      setSystemLoad({
-        cpu: Math.floor(8 + Math.random() * 15),
-        mem: Math.floor(60 + Math.random() * 10)
-      });
-    }, 5000);
+    const fetchLockdownStatus = async () => {
+      try {
+        const res = await axios.get('/api/system/lockdown');
+        setIsLockedDown(res.data.isLockedDown);
+      } catch (e) {
+        console.error('Lockdown fetch error:', e);
+      }
+    };
+    fetchLockdownStatus();
+
+    // Fetch real-time load
+    const fetchHealth = async () => {
+      try {
+        const res = await axios.get('/api/system/health');
+        setSystemLoad({ cpu: res.data.cpu, mem: res.data.mem });
+      } catch (e) {
+        console.error('Health fetch error:', e);
+      }
+    };
+    
+    fetchHealth();
+    const interval = setInterval(fetchHealth, 5000);
     return () => clearInterval(interval);
   }, []);
 
-  const handleLockdown = () => {
+  const handleLockdown = async () => {
     if (window.confirm('CRITICAL: Initiating Global System Lockdown. This will suspend all verification nodes. Proceed?')) {
       setIsLockingDown(true);
-      setTimeout(() => {
+      try {
+        await axios.post('/api/system/lockdown');
+        setIsLockedDown(true);
         alert('Ecosystem Suspended. Master Oracle is now in Read-Only mode.');
+      } catch (error) {
+        alert('Failed to initiate lockdown');
+      } finally {
         setIsLockingDown(false);
-      }, 2000);
+      }
     }
   };
 
@@ -67,7 +89,20 @@ export const AdminPanel = () => {
   );
 
   return (
-    <div className="space-y-12 max-w-6xl mx-auto animate-in fade-in slide-in-from-top-4 duration-500">
+    <div className={`space-y-12 max-w-6xl mx-auto animate-in fade-in slide-in-from-top-4 duration-500 ${isLockedDown ? 'opacity-80 grayscale pointer-events-none' : ''}`}>
+      {isLockedDown && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm pointer-events-auto">
+          <div className="bg-red-600 text-white p-12 rounded-3xl max-w-lg text-center space-y-6 shadow-2xl">
+            <Lock size={64} className="mx-auto" />
+            <div>
+              <h2 className="text-4xl font-bold uppercase tracking-tighter">System Lockdown</h2>
+              <p className="opacity-80 mt-2 font-mono text-xs uppercase tracking-widest">Global Master Oracle Suspended</p>
+            </div>
+            <p className="text-sm font-medium">All edge verification nodes are disabled. Biometric ingestion has been halted across all geographic zones.</p>
+          </div>
+        </div>
+      )}
+      
       <header className="flex flex-col md:flex-row justify-between items-start md:items-center py-10 gap-4">
         <div>
           <h1 className="text-5xl font-bold tracking-tighter uppercase leading-none">Global Oracle</h1>

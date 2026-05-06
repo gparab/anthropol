@@ -33,6 +33,7 @@ import { auth } from '../lib/firebase';
 export const AnthropolAnalyticsHub = () => {
   const [analytics, setAnalytics] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   /**
    * Analytics Data Stream Initialization
@@ -43,16 +44,36 @@ export const AnthropolAnalyticsHub = () => {
     const user = auth.currentUser;
     if (!user) return;
 
-    return verificationService.subscribeToClientAnalytics(user.uid, (data) => {
-      setAnalytics(data);
-      setLoading(false);
-    });
+    return verificationService.subscribeToClientAnalytics(
+      user.uid, 
+      (data) => {
+        setAnalytics(data);
+        setLoading(false);
+        setError(null);
+      },
+      (err) => {
+        setError(err);
+        setLoading(false);
+      }
+    );
   }, []);
 
-  if (loading) {
+  if (loading && !error) {
     return (
       <div className="h-[60vh] flex items-center justify-center">
         <Activity className="animate-spin text-brand-accent" size={32} />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="h-[60vh] flex items-center justify-center">
+        <div className="text-center space-y-4">
+          <ShieldAlert className="mx-auto text-red-500" size={48} />
+          <h2 className="text-2xl font-bold uppercase text-red-500 tracking-tighter">Network Error</h2>
+          <p className="text-brand-secondary">{error}</p>
+        </div>
       </div>
     );
   }
