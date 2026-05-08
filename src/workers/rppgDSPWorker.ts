@@ -109,15 +109,40 @@ function processPOS(r: Float32Array, g: Float32Array, b: Float32Array): void {
  */
 self.onmessage = (e: MessageEvent<RGBPoint[]>) => {
   const points = e.data;
-  if (points.length < WINDOW_SIZE) return;
+  if (points.length < 2) return;
 
-  // Fill pre-allocated buffers from stream
-  const start = Math.max(0, points.length - WINDOW_SIZE);
+  // --- LINEAR INTERPOLATION / RESAMPLING TO 30Hz ---
+  // Normalizes Variable Frame Rate (VFR) to Constant Frame Rate (CFR)
+  const startTime = points[0].timestamp;
+  const interval = 1000 / SAMPLING_RATE; // 33.33ms
+  
   for (let i = 0; i < WINDOW_SIZE; i++) {
-    const p = points[start + i];
-    rBuffer[i] = p.r;
-    gBuffer[i] = p.g;
-    bBuffer[i] = p.b;
+    const targetTime = startTime + i * interval;
+    
+    // Find bounding samples for interpolation
+    let left = 0;
+    while (left < points.length - 2 && points[left + 1].timestamp < targetTime) {
+      left++;
+    }
+    const right = left + 1;
+    
+    const p1 = points[left];
+    const p2 = points[right];
+    
+    const t1 = p1.timestamp;
+    const t2 = p2.timestamp;
+    
+    if (t2 <= t1) {
+      rBuffer[i] = p1.r;
+      gBuffer[i] = p1.g;
+      bBuffer[i] = p1.b;
+    } else {
+      // Linear weight clamp to [0, 1] to prevent extrapolation spikes
+      const w = Math.max(0, Math.min(1, (targetTime - t1) / (t2 - t1)));
+      rBuffer[i] = p1.r + w * (p2.r - p1.r);
+      gBuffer[i] = p1.g + w * (p2.g - p1.g);
+      bBuffer[i] = p1.b + w * (p2.b - p1.b);
+    }
   }
 
   // Execute DSP pipeline (zero-allocation main loop)

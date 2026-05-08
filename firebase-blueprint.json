@@ -11,7 +11,6 @@
           "type": "object",
           "properties": {
             "publicKey": { "type": "string" },
-            "secretKey": { "type": "string" },
             "webhookUrl": { "type": "string" },
             "lastRotated": { "type": "string", "format": "date-time" }
           }
@@ -33,6 +32,15 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["name", "tier", "createdAt"]
+    },
+    "ClientPrivate": {
+      "title": "Sensitive Infrastructure Keys",
+      "description": "Enclave-protected secrets",
+      "type": "object",
+      "properties": {
+        "secretKey": { "type": "string" },
+        "vaultId": { "type": "string" }
+      }
     },
     "Verification": {
       "title": "Liveness Verification",
@@ -85,7 +93,11 @@
   "firestore": {
     "clients/{clientId}": {
       "schema": "Client",
-      "description": "Organization profile"
+      "description": "Organization profile (Non-sensitive metadata)"
+    },
+    "clients/{clientId}/private/main": {
+      "schema": "ClientPrivate",
+      "description": "Restricted infrastructure secrets (Admin SDK Only)"
     },
     "verifications/{verificationId}": {
       "schema": "Verification",
@@ -110,6 +122,20 @@
         }
       },
       "description": "Registry of users with administrative privileges."
+    },
+    "authenticators/{credentialID}": {
+      "schema": {
+        "title": "Hardware Authenticator",
+        "description": "FIDO2/WebAuthn credentials",
+        "type": "object",
+        "properties": {
+          "userId": { "type": "string" },
+          "publicKey": { "type": "string" },
+          "counter": { "type": "number" },
+          "fmt": { "type": "string" }
+        }
+      },
+      "description": "Registry of hardware-bound signatures."
     }
   }
 }

@@ -27,8 +27,19 @@ export const cryptoOracle = {
     credentialId?: string
   ): Promise<ZKProof> {
     // Input signal derivation (Field element compatible)
+    // Extract first 64 samples and normalize to integers for Circom processing
+    const rppgInput = (telemetry.samples || []).slice(0, 64).map(s => {
+      // If signal is complex object {r,g,b}, average them; otherwise use raw value
+      const val = typeof s === 'object' ? (s.r + s.g + s.b) / 3 : s;
+      // Scale by 1000 to preserve precision before rounding to integer
+      return BigInt(Math.round(val * 1000)).toString();
+    });
+
+    // Pad with zero-signal if data is too short (edge case)
+    while (rppgInput.length < 64) rppgInput.push("0");
+
     const input = {
-      bpm: BigInt(Math.round(telemetry.bpm || 72)).toString(),
+      rppg: rppgInput,
       signalHash: BigInt(ethers.id(JSON.stringify(telemetry.samples || []))).toString(),
       userIdHash: BigInt(ethers.id(userId)).toString(),
       credentialHash: BigInt(credentialId ? ethers.id(credentialId) : ethers.id('no_hardware_bound')).toString(),

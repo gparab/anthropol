@@ -22,15 +22,12 @@ service cloud.firestore {
     
     function isValidClient(data) {
       // Create requires exact keys: name, tier, apiKeys, legalZone, privacySettings, usage, createdAt
-      // But initializeClientProfile might provide fields incrementally or all at once.
-      // Based on initializeClientProfile, it provides: name, tier, apiKeys, legalZone, privacySettings, usage, createdAt. (7 keys)
       return data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
              data.tier in ['standard', 'enterprise'] &&
              data.createdAt is timestamp &&
              data.usage.currentMonth is int &&
              data.usage.limit is int &&
              data.apiKeys.publicKey is string &&
-             data.apiKeys.secretKey is string &&
              data.legalZone is string &&
              data.privacySettings.purgeTelemetry is bool;
     }
@@ -60,20 +57,24 @@ service cloud.firestore {
                       incoming().createdAt == request.time;
       
       allow update: if (isOwner(clientId) || isAdmin()) && (
-        // Action: Update Profile Settings
-        (incoming().diff(existing()).affectedKeys().hasOnly(['name', 'privacySettings', 'apiKeys', 'legalZone']) && 
+        // Action: Update Profile Settings (Strictly limited to non-billing/tier fields for owners)
+        (isOwner(clientId) && 
+         incoming().diff(existing()).affectedKeys().hasOnly(['name', 'privacySettings', 'apiKeys', 'legalZone']) && 
+         incoming().apiKeys.keys().hasOnly(['publicKey', 'webhookUrl', 'lastRotated']) &&
          incoming().name is string && incoming().name.size() <= 100) ||
         
-        // Action: Usage Increment (Master Gate relational write constraint)
-        (incoming().diff(existing()).affectedKeys().hasOnly(['usage']) && 
-         incoming().usage.currentMonth is int) ||
-        
-        // Action: Tier Upgrade
-        (incoming().diff(existing()).affectedKeys().hasOnly(['tier', 'usage']) && 
-         incoming().tier in ['standard', 'enterprise']) ||
+        // Administrative Action: Adjust Billing quota or tier
+        (isAdmin() && 
+         incoming().diff(existing()).affectedKeys().hasAny(['usage', 'tier'])) ||
         
         isAdmin()
       );
+
+      // Private infrastructure secrets
+      match /private/main {
+         // Owners CANNOT read secretKey directly from Firestore protocol
+         allow read, write: if isAdmin();
+      }
     }
 
     // 2. Verifications

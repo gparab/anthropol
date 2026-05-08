@@ -68,12 +68,19 @@ export function useAnthropol() {
 
   const [passkeyId, setPasskeyId] = useState<string | null>(localStorage.getItem('anthropol_passkey'));
   const workerRef = useRef<Worker | null>(null);
+  const samplingWorkerRef = useRef<Worker | null>(null);
 
-  // Initialize DSP Worker on mount
+  // Initialize DSP Workers on mount
   useEffect(() => {
     workerRef.current = new Worker(new URL('../workers/rppgDSPWorker.ts', import.meta.url), { type: 'module' });
+    samplingWorkerRef.current = new Worker(new URL('../workers/samplingWorker.ts', import.meta.url), { type: 'module' });
+    
     if (passkeyId) setState(s => ({ ...s, hardwareBound: true }));
-    return () => workerRef.current?.terminate();
+    
+    return () => {
+      workerRef.current?.terminate();
+      samplingWorkerRef.current?.terminate();
+    };
   }, [passkeyId]);
 
   /**
@@ -138,38 +145,83 @@ export function useAnthropol() {
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
       if (!ctx) throw new Error('Sensor calibration failure: 2D Context missing');
 
-      const samples: RGBPoint[] = [];
-      const captureStart = performance.now();
       const TARGET_SAMPLES = 120; // Ensure we hit the DSP worker's WINDOW_SIZE
-      
-      // 2. BIOMETRIC CAPTURE LOOP
-      addLog('Sampling biological signals (POS algorithm active)...', 'info');
-      while (samples.length < TARGET_SAMPLES) {
-        const timestamp = performance.now();
-        const elapsed = timestamp - captureStart;
-        ctx.drawImage(videoElement, 0, 0);
-        
-        try {
-          const { r, g, b } = dsp.analyzeFrame(ctx.getImageData(canvas.width / 2 - 25, canvas.height / 2 - 25, 50, 50));
-          samples.push({ r, g, b, timestamp });
-        } catch (captureErr) {
-          addLog('Frame sampling jitter detected', 'warn');
-        }
-        
-        setState(s => ({ 
-          ...s, 
-          status: 'CAPTURING BIOMETRIC BURST', 
-          progress: (samples.length / TARGET_SAMPLES) * 100,
-          metrics: {
-            ...s.metrics,
-            rppgDiff: `${(Math.random() * 0.05 - 0.025).toFixed(2)}ms`,
-            bpm: Math.floor(68 + Math.random() * 8)
-          }
-        }));
-        await new Promise(r => setTimeout(r, 33)); // ~30Hz sampling rate
-      }
 
-      addLog(`Biometric burst complete. Captured ${samples.length} RGB samples.`, 'info');
+      // 2. BIOMETRIC CAPTURE LOOP
+      addLog('Sampling biological signals (Worker-offloaded sampling active)...', 'info');
+      
+      const samples: RGBPoint[] = await new Promise((resolve, reject) => {
+        const localSamples: RGBPoint[] = [];
+        let rafId: number;
+        let lastSampleTime = 0;
+        const SAMPLE_INTERVAL = 1000 / 30; // 30Hz sampling rate
+
+        const samplingWorker = samplingWorkerRef.current;
+        if (!samplingWorker) return reject(new Error('Sampling worker not initialized'));
+
+        // Initialize worker with dimensions
+        samplingWorker.postMessage({ 
+          type: 'INIT', 
+          payload: { width: videoElement.videoWidth, height: videoElement.videoHeight } 
+        });
+
+        const onWorkerMessage = (e: MessageEvent) => {
+          if (e.data.type === 'RESULT') {
+            const { r, g, b, timestamp } = e.data.payload;
+            localSamples.push({ r, g, b, timestamp });
+            
+            setState(s => ({ 
+              ...s, 
+              status: 'CAPTURING BIOMETRIC BURST', 
+              progress: (localSamples.length / TARGET_SAMPLES) * 100,
+              metrics: {
+                ...s.metrics,
+                rppgDiff: `${(Math.random() * 0.05 - 0.025).toFixed(2)}ms`,
+                bpm: Math.floor(68 + Math.random() * 8)
+              }
+            }));
+
+            if (localSamples.length >= TARGET_SAMPLES) {
+              cleanup();
+              resolve(localSamples);
+            }
+          }
+        };
+
+        const cleanup = () => {
+          cancelAnimationFrame(rafId);
+          samplingWorker.removeEventListener('message', onWorkerMessage);
+        };
+
+        const tick = async (time: number) => {
+          if (localSamples.length >= TARGET_SAMPLES) return;
+
+          // Target 30fps sampling
+          if (time - lastSampleTime >= SAMPLE_INTERVAL) {
+            lastSampleTime = time;
+            try {
+              // Creating an ImageBitmap from the video element is much faster 
+              // than drawImage + getImageData on the main thread.
+              const bitmap = await createImageBitmap(videoElement);
+              
+              // Transfer the bitmap to the worker (zero-copy)
+              samplingWorker.postMessage({ 
+                type: 'SAMPLE', 
+                payload: { bitmap, timestamp: performance.now() } 
+              }, [bitmap]);
+            } catch (err) {
+              addLog('Frame capture dropped due to sensor jitter', 'warn');
+            }
+          }
+
+          rafId = requestAnimationFrame(tick);
+        };
+
+        samplingWorker.addEventListener('message', onWorkerMessage);
+        rafId = requestAnimationFrame(tick);
+      });
+
+      addLog(`Biometric burst complete. Captured ${samples.length} RGB samples via Web Worker.`, 'info');
 
   // 3. DIGITAL SIGNAL PROCESSING
       setState(s => ({ ...s, status: 'ANALYZING BIOLOGY (WORKER)', progress: 100 }));
@@ -269,10 +321,26 @@ export function useAnthropol() {
           // Only works if the device has a valid Platform Authenticator (FaceID/TouchID)
           const binding = await signTelemetryPayload(
             samples.map(s => (s.r + s.g + s.b) / 3), // Simplified signal for signature binding
+            user?.uid || 'anonymous',
             passkeyId
           );
           hardwareBindingData = binding;
           addLog('Hardware-Biological Binding successful.', 'info');
+
+          // [SERVER-SIDE ATTESTATION]: Actually verify the signature against the challenge
+          addLog('Synchronizing hardware attestation with server...', 'info');
+          const verifyRes = await fetch('/api/verify/hardware', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              body: binding.signature,
+              clientId: user?.uid || 'anonymous',
+              telemetryHash: binding.telemetryHash
+            })
+          });
+          const verifyData = await verifyRes.json();
+          if (!verifyData.success) throw new Error(verifyData.error || 'HARDWARE_VERIFICATION_REJECTED');
+          addLog('Server-side hardware verification PASSED.', 'info');
         } catch (bindingErr: any) {
           addLog(`Hardware Binding failed: ${bindingErr.message}. Proceeding without TPM attestation.`, 'warn');
         }

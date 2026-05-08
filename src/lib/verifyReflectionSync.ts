@@ -8,54 +8,58 @@ export interface VerificationResult {
 }
 
 /**
- * Computes the Discrete Fourier Transform (DFT) for a real signal.
- */
-function computeDFT(signal: number[]) {
-  const N = signal.length;
-  const real = new Float32Array(N);
-  const imag = new Float32Array(N);
-  for (let k = 0; k < N; k++) {
-    for (let n = 0; n < N; n++) {
-      const angle = (2 * Math.PI * k * n) / N;
-      real[k] += signal[n] * Math.cos(angle);
-      imag[k] -= signal[n] * Math.sin(angle);
-    }
-  }
-  return { real, imag };
-}
-
-/**
- * Computes the zero-lag cross-correlation in the frequency domain using the Cross-Power Spectrum.
+ * Computes the maximum cross-correlation coefficient across a range of lags (-15 to +15).
+ * Accounts for hardware display-to-camera latency (phase shift).
  */
 function frequencyDomainCrossCorrelation(observed: number[], expected: number[]): number {
   const N = Math.min(observed.length, expected.length);
-  if (N === 0) return 0;
+  if (N < 30) return 0; // Need enough samples for meaningful correlation
 
-  // Detrend
-  const meanObs = observed.reduce((a, b) => a + b, 0) / N;
-  const meanExp = expected.reduce((a, b) => a + b, 0) / N;
-  
-  const obsDetrended = observed.slice(0, N).map(v => v - meanObs);
-  const expDetrended = expected.slice(0, N).map(v => v - meanExp);
-  
-  const X = computeDFT(obsDetrended);
-  const Y = computeDFT(expDetrended);
-  
-  let crossPowerRealSum = 0;
-  let powerX = 0;
-  let powerY = 0;
-  
-  for (let k = 0; k < N; k++) {
-    // S_xy = X(k) * conj(Y(k))
-    const realPart = X.real[k] * Y.real[k] + X.imag[k] * Y.imag[k];
-    crossPowerRealSum += realPart;
-    
-    powerX += X.real[k] * X.real[k] + X.imag[k] * X.imag[k];
-    powerY += Y.real[k] * Y.real[k] + Y.imag[k] * Y.imag[k];
+  const MAX_LAG = 15;
+  let maxCorr = -1;
+
+  for (let lag = -MAX_LAG; lag <= MAX_LAG; lag++) {
+    let sumObs = 0;
+    let sumExp = 0;
+    let sumObsSq = 0;
+    let sumExpSq = 0;
+    let sumProduct = 0;
+    let count = 0;
+
+    for (let i = 0; i < N; i++) {
+      const j = i + lag;
+      if (j >= 0 && j < N) {
+        const vObs = observed[i];
+        const vExp = expected[j];
+        
+        sumObs += vObs;
+        sumExp += vExp;
+        sumObsSq += vObs * vObs;
+        sumExpSq += vExp * vExp;
+        sumProduct += vObs * vExp;
+        count++;
+      }
+    }
+
+    if (count > 0) {
+      // Calculate Pearson Correlation Coefficient for this lag
+      const meanObs = sumObs / count;
+      const meanExp = sumExp / count;
+      
+      const numerator = sumProduct - count * meanObs * meanExp;
+      const denominator = Math.sqrt(
+        (sumObsSq - count * meanObs * meanObs) * 
+        (sumExpSq - count * meanExp * meanExp)
+      );
+      
+      const correlation = denominator === 0 ? 0 : numerator / denominator;
+      if (correlation > maxCorr) {
+        maxCorr = correlation;
+      }
+    }
   }
-  
-  if (powerX === 0 || powerY === 0) return 0;
-  return crossPowerRealSum / Math.sqrt(powerX * powerY);
+
+  return Math.max(0, maxCorr);
 }
 
 /**

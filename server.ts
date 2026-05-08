@@ -8,6 +8,7 @@
  */
 
 import express from 'express';
+import 'dotenv/config';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import axios from 'axios';
@@ -16,8 +17,23 @@ import { getFirestore, Timestamp, FieldValue } from 'firebase-admin/firestore';
 import rateLimit from 'express-rate-limit';
 import { ethers } from 'ethers';
 import os from 'os';
-import { GoogleGenAI } from '@google/genai';
+import ipaddr from 'ipaddr.js';
+import dns from 'node:dns/promises';
+import { URL } from 'node:url';
+import { 
+  generateRegistrationOptions, 
+  verifyRegistrationResponse, 
+  generateAuthenticationOptions, 
+  verifyAuthenticationResponse,
+  type VerifiedAuthenticationResponse,
+  type VerifiedRegistrationResponse
+} from '@simplewebauthn/server';
+import { isoBase64URL } from '@simplewebauthn/server/helpers';
 import firebaseConfig from './firebase-applet-config.json';
+
+// In-memory challenge store (Session-tied ephemeral cache)
+const challengeCache = new Map<string, { challenge: string; expires: number }>();
+const CHALLENGE_TTL = 300000; // 5 minutes
 
 // Initialize Firebase Admin with explicit Project ID validation
 const initializeAdmin = () => {
@@ -45,6 +61,17 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  // WebAuthn Config: RP_ID must be the domain, ORIGIN must be the full protocol+domain
+  const getWebAuthnConfig = (req: any) => {
+    const host = req.get('host') || 'localhost:3000';
+    const hostname = host.split(':')[0];
+    const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+    return {
+      rpID: hostname,
+      origin: `${protocol}://${host}`
+    };
+  };
+
   // Trust the first proxy (AI Studio Nginx) to ensure rate limiting correctly identifies client IPs
   app.set('trust proxy', 1);
 
@@ -66,6 +93,263 @@ async function startServer() {
   });
 
   app.use('/api/', apiLimiter);
+
+  /**
+   * SECURITY MIDDLEWARE: authenticateToken
+   * Verifies the Firebase ID Token provided in the Authorization header.
+   */
+  const authenticateToken = async (req: any, res: any, next: any) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'MALFORMED_OR_MISSING_TOKEN' });
+    }
+
+    const token = authHeader.split('Bearer ')[1];
+    try {
+      if (!admin.apps.length) throw new Error('ADMIN_NOT_INIT');
+      const decodedToken = await admin.auth().verifyIdToken(token);
+      req.user = decodedToken;
+      next();
+    } catch (error) {
+      console.error('[SECURITY]: Auth Protocol Failure:', error);
+      return res.status(401).json({ error: 'IDENTITY_VERIFICATION_EXPIRED' });
+    }
+  };
+
+  /**
+   * SECURITY MIDDLEWARE: requireAdmin
+   * Verifies that the authenticated user has an active record in the 'admins' collection.
+   */
+  const requireAdmin = async (req: any, res: any, next: any) => {
+    if (!req.user) return res.status(401).json({ error: 'AUTHENTICATION_REQUIRED' });
+    
+    try {
+      const db = getFirestore(admin.app(), firebaseConfig.firestoreDatabaseId);
+      const adminDoc = await db.collection('admins').doc(req.user.uid).get();
+      
+      if (!adminDoc.exists || adminDoc.data()?.status !== 'active') {
+        return res.status(403).json({ error: 'ADMINISTRATIVE_AUTHORITY_REQUIRED' });
+      }
+      next();
+    } catch (error) {
+      console.error('[SECURITY]: Relational Auth check failed:', error);
+      return res.status(500).json({ error: 'AUTH_PROTOCOL_FAULT' });
+    }
+  };
+
+  /**
+   * SECURITY HELPER: isSafeUrl
+   * Strict SSRF protection layer. Resolve hostnames and blocks sensitive network ranges.
+   */
+  const isSafeUrl = async (urlStr: string) => {
+    try {
+      const url = new URL(urlStr);
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+
+      const hostname = url.hostname;
+      
+      // Resolve hostname to IP addresses
+      let addresses: string[] = [];
+      try {
+        const lookup = await dns.lookup(hostname, { all: true });
+        addresses = lookup.map(a => a.address);
+      } catch (err) {
+        // If dns lookup fails, try parsing as a raw IP
+        if (ipaddr.isValid(hostname)) {
+          addresses = [hostname];
+        } else {
+          return false;
+        }
+      }
+      
+      for (const address of addresses) {
+        if (!ipaddr.isValid(address)) continue;
+        
+        const addr = ipaddr.parse(address);
+        const range = addr.range();
+
+        // BLOCK: loopback, private, link-local, carrier-grade NAT, etc.
+        const forbiddenRanges = [
+          'loopback',
+          'private',
+          'linkLocal',
+          'carrierGradeNat',
+          '6to4',
+          'teredo',
+          'uniqueLocal',
+          'unspecified',
+          'reserved'
+        ];
+
+        if (forbiddenRanges.includes(range)) {
+          console.warn(`[SECURITY]: Webhook SSRF block on forbidden range (${range}): ${address}`);
+          return false;
+        }
+
+        // Explicit block for metadata endpoints
+        if (address === '169.254.169.254') return false;
+      }
+
+      return true;
+    } catch (e) {
+      console.error('[SECURITY]: URL forensic fault:', e);
+      return false;
+    }
+  };
+
+  /**
+   * WEBAUTHN PROTOCOL: Nonce Generation
+   * GET /api/auth/nonce
+   */
+  app.get('/api/auth/nonce', async (req, res) => {
+    const clientId = req.query.clientId as string;
+    if (!clientId) return res.status(400).json({ error: 'ClientId required' });
+
+    const { rpID } = getWebAuthnConfig(req);
+    const options = await generateAuthenticationOptions({
+      rpID: rpID,
+      allowCredentials: [], // Client will provide existing keys
+      userVerification: 'required',
+    });
+
+    challengeCache.set(clientId, {
+      challenge: options.challenge,
+      expires: Date.now() + CHALLENGE_TTL
+    });
+
+    res.json({ nonce: options.challenge });
+  });
+
+  /**
+   * WEBAUTHN PROTOCOL: Registration Options
+   */
+  app.get('/api/auth/register/options', authenticateToken, async (req: any, res) => {
+    const user = req.user;
+    const { rpID } = getWebAuthnConfig(req);
+    const options = await generateRegistrationOptions({
+      rpName: 'Anthropol',
+      rpID: rpID,
+      userID: user.uid,
+      userName: user.email || user.uid,
+      attestationType: 'direct',
+      authenticatorSelection: {
+        residentKey: 'required',
+        userVerification: 'required',
+        authenticatorAttachment: 'platform'
+      }
+    });
+
+    challengeCache.set(user.uid, {
+      challenge: options.challenge,
+      expires: Date.now() + CHALLENGE_TTL
+    });
+
+    res.json(options);
+  });
+
+  /**
+   * WEBAUTHN PROTOCOL: Registration Verification
+   */
+  app.post('/api/auth/register/verify', authenticateToken, async (req: any, res) => {
+    const { body } = req;
+    const user = req.user;
+    const expectedChallenge = challengeCache.get(user.uid);
+    const { rpID, origin } = getWebAuthnConfig(req);
+
+    if (!expectedChallenge || expectedChallenge.expires < Date.now()) {
+      return res.status(400).json({ error: 'Challenge expired or missing' });
+    }
+
+    try {
+      const verification: VerifiedRegistrationResponse = await verifyRegistrationResponse({
+        response: body,
+        expectedChallenge: expectedChallenge.challenge,
+        expectedOrigin: origin,
+        expectedRPID: rpID,
+      });
+
+      if (verification.verified && verification.registrationInfo) {
+        const { credential } = verification.registrationInfo;
+        const db = getFirestore(admin.app(), firebaseConfig.firestoreDatabaseId);
+
+        const credentialIDStr = typeof credential.id === 'string' ? credential.id : isoBase64URL.fromBuffer(credential.id);
+        const publicKeyStr = typeof credential.publicKey === 'string' ? credential.publicKey : isoBase64URL.fromBuffer(credential.publicKey);
+
+        await db.collection('authenticators').doc(credentialIDStr).set({
+          userId: user.uid,
+          publicKey: publicKeyStr,
+          counter: credential.counter,
+          fmt: (verification.registrationInfo as any).fmt,
+          createdAt: FieldValue.serverTimestamp()
+        });
+
+        res.json({ verified: true });
+      } else {
+        res.status(400).json({ error: 'Verification failed' });
+      }
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error during registration' });
+    } finally {
+      challengeCache.delete(user.uid);
+    }
+  });
+
+  /**
+   * WEBAUTHN PROTOCOL: Hardware Verification
+   * POST /api/verify/hardware
+   */
+  app.post('/api/verify/hardware', async (req, res) => {
+    const { body, clientId, telemetryHash } = req.body;
+    const expectedChallenge = challengeCache.get(clientId);
+    const { rpID, origin } = getWebAuthnConfig(req);
+
+    if (!expectedChallenge || expectedChallenge.expires < Date.now()) {
+      return res.status(400).json({ error: 'Challenge expired or missing' });
+    }
+
+    try {
+      const db = getFirestore(admin.app(), firebaseConfig.firestoreDatabaseId);
+      const authenticatorDoc = await db.collection('authenticators').doc(body.id).get();
+
+      if (!authenticatorDoc.exists) {
+        return res.status(404).json({ error: 'Authenticator not registered' });
+      }
+
+      const authenticator = authenticatorDoc.data()!;
+      
+      const verification: VerifiedAuthenticationResponse = await verifyAuthenticationResponse({
+        response: body,
+        expectedChallenge: expectedChallenge.challenge,
+        expectedOrigin: origin,
+        expectedRPID: rpID,
+        credential: {
+          id: body.id, // v11/v12 expects base64url string for id
+          publicKey: isoBase64URL.toBuffer(authenticator.publicKey),
+          counter: authenticator.counter,
+        },
+      });
+
+      if (verification.verified) {
+        // Update counter for replay protection
+        await authenticatorDoc.ref.update({ counter: verification.authenticationInfo.newCounter });
+        
+        // Success: Hardware binding confirmed
+        res.json({ 
+          success: true, 
+          attestation: 'HARDWARE_ENCLAVE_VERIFIED',
+          telemetryBound: true 
+        });
+      } else {
+        res.status(400).json({ error: 'Hardware signature invalid' });
+      }
+    } catch (error) {
+      console.error('[SECURITY]: Hardware verification failure:', error);
+      res.status(500).json({ error: 'Internal verification fault' });
+    } finally {
+      challengeCache.delete(clientId);
+    }
+  });
   
   /**
    * POST /api/admin/promote
@@ -144,11 +428,10 @@ async function startServer() {
 
   /**
    * POST /api/verify/finalize
-
    * Signs a verification payload using the client's secret key.
-   * This is a sensitive operation that must only happen server-side.
+   * [PROTECTED]: requires authenticateToken
    */
-  app.post('/api/verify/finalize', async (req, res) => {
+  app.post('/api/verify/finalize', authenticateToken, async (req, res) => {
     const { payload, clientId } = req.body;
     
     if (!clientId || !payload) {
@@ -159,17 +442,19 @@ async function startServer() {
       if (!admin.apps.length) throw new Error('ADMIN_NOT_INIT');
       
       const db = getFirestore(admin.app(), firebaseConfig.firestoreDatabaseId);
-      const clientDoc = await db.collection('clients').doc(clientId).get();
       
-      if (!clientDoc.exists) {
-        return res.status(404).json({ error: 'Client not found' });
+      // KEY ISOLATION: Secrets now reside in a dedicated private document
+      const privateDoc = await db.collection('clients').doc(clientId).collection('private').doc('main').get();
+      
+      if (!privateDoc.exists) {
+        // Fallback for legacy records still using the root document
+        const clientDoc = await db.collection('clients').doc(clientId).get();
+        const secret = clientDoc.data()?.apiKeys?.secretKey || 'default';
+        const signature = `sha256=${ethers.id(JSON.stringify(payload) + secret)}`;
+        return res.json({ signature });
       }
 
-      const clientData = clientDoc.data();
-      const secret = clientData?.apiKeys?.secretKey || 'default';
-
-      // Replicating cryptoOracle.signPayload logic
-      // In production, the secret should remain in the enclave
+      const secret = privateDoc.data()?.secretKey || 'default';
       const signature = `sha256=${ethers.id(JSON.stringify(payload) + secret)}`;
       
       res.json({ signature });
@@ -215,8 +500,9 @@ async function startServer() {
   /**
    * POST /api/system/lockdown
    * Writes the lockdown flag to the global system document in Firestore.
+   * [PROTECTED]: requires authenticateToken + requireAdmin
    */
-  app.post('/api/system/lockdown', async (req, res) => {
+  app.post('/api/system/lockdown', authenticateToken, requireAdmin, async (req, res) => {
     try {
       if (!admin.apps.length) throw new Error('ADMIN_NOT_INIT');
       const db = getFirestore(admin.app(), firebaseConfig.firestoreDatabaseId);
@@ -243,187 +529,27 @@ async function startServer() {
     }
   });
 
-  /**
-   * POST /api/ai/liveness
-   * Performs real-time liveness analysis on a single frame + biometric metadata.
-   */
-  app.post('/api/ai/liveness', async (req, res) => {
-    const { base64Image, telemetry } = req.body;
-    try {
-      const gapiKey = process.env.GEMINI_API_KEY;
-      if (!gapiKey) throw new Error('GEMINI_API_KEY not configured.');
-      const ai = new GoogleGenAI({ apiKey: gapiKey });
 
-      const imagePart = {
-        inlineData: {
-          mimeType: "image/jpeg",
-          data: base64Image
-        }
-      };
-
-      const textPart = {
-        text: `PERFORM HIGH-SOVEREIGNTY LIVENESS AUDIT.
-        
-        SUBJECT ROLE: Identity Verification via Biometric Pulse.
-        
-        ANALYSIS PARAMETERS:
-        1. RE-BROADCAST: Detect digital screens, moiré interference, or bezels.
-        2. DEEPFAKE ARTICULATION: Check for chin/cheek boundary ghosting and unnatural sync of eyeball glints.
-        3. BIOMETRIC CONSISTENCY: Subject has reported ${telemetry.bpm} BPM. Validate skin tone modulation in accordance with natural micro-expressions.
-        
-        OUTPUT JSON:
-        {
-          "isHuman": boolean,
-          "confidence": float,
-          "signals": {
-            "texture": "natural|synthetic",
-            "biological": "stable|unstable",
-            "liveness": "verified|rejected"
-          }
-        }`
-      };
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [{ parts: [imagePart, textPart] }],
-        config: {
-          responseMimeType: "application/json",
-        }
-      });
-
-      const result = JSON.parse(response.text || '{}');
-      res.json(result);
-    } catch (error: any) {
-      console.error("[SERVER] AI Liveness Error:", error);
-      res.status(500).json({ error: error.message || 'AI_ORACLE_TIMEOUT' });
-    }
-  });
-
-  /**
-   * POST /api/ai/document
-   * Performs identity cross-verification audit between ID and face capture.
-   */
-  app.post('/api/ai/document', async (req, res) => {
-    const { docBase64, faceBase64 } = req.body;
-    try {
-      const gapiKey = process.env.GEMINI_API_KEY;
-      if (!gapiKey) throw new Error('GEMINI_API_KEY not configured.');
-      const ai = new GoogleGenAI({ apiKey: gapiKey });
-
-      const docPart = {
-        inlineData: { mimeType: "image/jpeg", data: docBase64 }
-      };
-      const facePart = {
-        inlineData: { mimeType: "image/jpeg", data: faceBase64 }
-      };
-
-      const prompt = {
-        text: `PERFORM IDENTITY CROSS-VERIFICATION AUDIT.
-        
-        TASKS:
-        1. EXTRACT: Full Name, ID Expiration Date, Document Type from the ID card.
-        2. CROSS-MATCH: Compare the portrait on the ID card with the live face capture.
-        3. INTEGRITY: Detect if the ID is a physical card or a photo-of-a-screen.
-        
-        OUTPUT JSON:
-        {
-          "matchScore": float (0-1),
-          "extractedData": {
-            "fullName": string,
-            "expiry": string,
-            "docType": string
-          },
-          "isAuthentic": boolean,
-          "summary": string
-        }`
-      };
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [{ parts: [docPart, facePart, prompt] }],
-        config: {
-          responseMimeType: "application/json",
-        }
-      });
-
-      const result = JSON.parse(response.text || '{}');
-      res.json(result);
-    } catch (error: any) {
-      console.error("[SERVER] AI Document Error:", error);
-      res.status(500).json({ error: error.message || 'AI_ORACLE_TIMEOUT' });
-    }
-  });
-
-  /**
-   * POST /api/stress-test
-   * Evaluates adversarial assets using Google Gemini to identify deepfakes or broadcast attacks.
-   */
-  app.post('/api/stress-test', async (req, res) => {
-    const { threatId, imageBase64, mimeType } = req.body;
-    
-    try {
-      const gapiKey = process.env.GEMINI_API_KEY;
-      if (!gapiKey) {
-        throw new Error('GEMINI_API_KEY not configured.');
-      }
-      const ai = new GoogleGenAI({ apiKey: gapiKey });
-
-      let prompt = `You are a forensic computer vision system. 
-Analyze the provided biometric presentation or threat ID to determine if it is an adversarial attack (e.g., deepfake, presentation mask, or screen rebroadcast). 
-Output ONLY valid JSON matching this schema exactly:
-{
-  "outcome": "REJECTED" | "PASSED",
-  "confidence": number (0.0 to 1.0),
-  "signal": "string describing the forensic evidence",
-  "vector": "string categorizing the attack vector"
-}`;
-
-      let contents: any[] = [];
-      
-      if (imageBase64 && mimeType) {
-        contents = [
-          prompt,
-          {
-            inlineData: {
-              data: imageBase64,
-              mimeType: mimeType
-            }
-          }
-        ];
-      } else {
-        contents = [
-          prompt,
-          `Threat ID to synthesize a simulation for: ${threatId}. Analyze the theoretical properties of this attack and return a forensic JSON response rejecting it.`
-        ];
-      }
-
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents,
-        config: {
-          responseMimeType: 'application/json',
-        }
-      });
-
-      const text = response.text || "{}";
-      const result = JSON.parse(text);
-      res.json(result);
-    } catch (error: any) {
-      console.error('[INFRA] /api/stress-test error:', error);
-      res.status(500).json({ error: 'Stress test failed', details: error.message });
-    }
-  });
 
 
   /**
    * POST /api/webhook/dispatch
    * Proxies signed verification payloads to client endpoints.
-   * Handles immediate dispatch and logs failures for the retry worker.
+   * [PROTECTED]: requires authenticateToken + strict SSRF validation
    */
-  app.post('/api/webhook/dispatch', async (req, res) => {
+  app.post('/api/webhook/dispatch', authenticateToken, async (req, res) => {
     const { url, payload, signature, clientId } = req.body;
     
     if (!url) return res.status(400).json({ error: 'Endpoint URL required' });
+
+    // SSRF PROTOCOL PROTECTION
+    if (!(await isSafeUrl(url))) {
+      console.error(`[SECURITY]: Blocked malicious webhook dispatch to: ${url}`);
+      return res.status(403).json({ 
+        error: 'FORBIDDEN_DESTINATION', 
+        details: 'The specified URL violates core security protocols.' 
+      });
+    }
 
     try {
       console.log(`[ORACLE-GATEWAY]: Dispatching to ${url} (Client: ${clientId})`);

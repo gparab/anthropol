@@ -2,7 +2,6 @@ import React, { useState, useRef } from 'react';
 import { motion } from 'motion/react';
 import { Bug, ShieldAlert, CheckCircle, Upload, Play, AlertTriangle, Terminal, Activity, RefreshCw } from 'lucide-react';
 import { aiOracle } from '../lib/gemini';
-import axios from 'axios';
 
 const THREAT_PACKETS = [
   { 
@@ -42,10 +41,10 @@ export const StressTest = () => {
     setErrorMsg(null);
     
     try {
-      const response = await axios.post('/api/stress-test', { threatId });
-      setResult(response.data);
+      const data = await aiOracle.runStressTest(threatId);
+      setResult(data);
     } catch (error: any) {
-      setErrorMsg(error.response?.data?.error || error.message);
+      setErrorMsg(error.message);
     } finally {
       setIsTesting(false);
     }
@@ -65,11 +64,12 @@ export const StressTest = () => {
       reader.onloadend = async () => {
         const base64Data = reader.result?.toString().split(',')[1];
         if (base64Data) {
-          const response = await axios.post('/api/stress-test', {
-            imageBase64: base64Data,
-            mimeType: file.type || 'image/jpeg'
-          });
-          setResult(response.data);
+          try {
+            const data = await aiOracle.runStressTest('user_upload', base64Data, file.type || 'image/jpeg');
+            setResult(data);
+          } catch (err: any) {
+             setErrorMsg(err.message);
+          }
         }
         setIsTesting(false);
       };

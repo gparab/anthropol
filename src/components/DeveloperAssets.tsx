@@ -12,15 +12,9 @@ export const DeveloperAssets = () => {
   const [showPublic, setShowPublic] = useState(false);
 
   const handleRevealSecret = () => {
-    if (showSecret) {
-      setShowSecret(false);
-      return;
-    }
-    
-    // Simulating a secondary security interaction as recommended by UAT
-    if (window.confirm(" [SECURITY PROTOCOL] \n\nWarning: You are attempting to reveal a production-grade secret key (at_live_...). \n\nThis key grants full administrative access to your infrastructure nodes. Ensure complete privacy before proceeding.\n\nContinue with reveal?")) {
-      setShowSecret(true);
-    }
+    // [SECURITY]: Direct reveal is disabled in the new isolation protocol.
+    // In production, this would trigger an audit log or require MFA.
+    alert("[ENCLAVE PROTECTION]\n\nYour secret key is now isolated in a restricted subcollection. Administrative access via direct Firestore read is disabled to prevent protocol scraping.\n\nPlease refer to the Infrastructure Console or use the 'at_live_...' handle for API requests.");
   };
   const [isEditingName, setIsEditingName] = useState(false);
   const [newName, setNewName] = useState('');
@@ -182,15 +176,15 @@ export const DeveloperAssets = () => {
                   <div className="space-y-1">
                     <p className="mono text-[9px] uppercase opacity-40 font-bold tracking-widest">Secret Key</p>
                     <code className="text-xs font-bold font-mono">
-                      {showSecret ? profile?.apiKeys?.secretKey : 'at_live_••••••••••••••••••••••••'}
+                      {showSecret ? 'ENCLAVE_REDACTED' : 'at_live_••••••••••••••••••••••••'}
                     </code>
                   </div>
                   <button 
                     onClick={handleRevealSecret}
                     className="p-3 bg-white/10 rounded-lg hover:bg-brand-accent transition-colors border border-brand-primary/10"
-                    title={showSecret ? "Hide Secret" : "Reveal Secret"}
+                    title="Read restricted by protocol"
                   >
-                    <Eye size={14} className={showSecret ? "text-brand-accent" : ""} />
+                    <ShieldCheck size={14} className="text-brand-accent" />
                   </button>
                 </div>
                 <div className="bg-brand-surface border border-brand-primary/5 p-6 rounded-xl flex justify-between items-center group hover:bg-brand-primary hover:text-brand-paper transition-all">
@@ -257,7 +251,7 @@ export const DeveloperAssets = () => {
                 <div className="grid grid-cols-2 gap-4">
                    <button 
                     onClick={async () => {
-                      const res: any = await verificationService.testWebhook(profile?.apiKeys?.webhookUrl, profile?.apiKeys?.secretKey);
+                      const res: any = await verificationService.testWebhook(profile?.apiKeys?.webhookUrl);
                       if (res.status === 200) alert('✓ Webhook Delivered (200 OK)');
                       else alert(`✕ Delivery Failed: ${res.error || 'N/A'}`);
                     }}
